@@ -414,3 +414,10 @@ Sessionx.vim
 tags
 # Persistent undo
 [._]*.un~
+
+# Data folder
+data/
+
+
+
+
