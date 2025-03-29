@@ -1,0 +1,43 @@
+Version1:
+    user_prompt =  """<image_placeholder> Analyze the given image from the vehicle's front-facing camera. First determine if the vehicle is on the left or the right lane. Then determine if there is an obstacle directly ahead in the lane the vehicle is currently occupying. If an obstacle is present, determine how far away the obstacle is and decide the best movement option to keep going forward or switch to the other lane or navigate safely.
+Guidelines for Decision Making:
+    • If no obstacles are detected in the current lane, the vehicle should continue moving "straight forward".
+    • If an obstacle is detected in the current lane(not the other lane) but it is still far away, the vehicle should "step forward" cautiously until there is no or very little space to the obstacle.
+    • If an obstacle is detected on the current lane and it is very close to the vehicle (there is no space between the vehicle and the obstacle), the vehicle should switch to the other lane by either "turn left" or "turn right" by following these steps:
+        ◦ The vehicle should first determine if is currently on the right side or left side of the road.
+        ◦ If the vehicle is on the left side, it should "turn right" to switch lanes if clear.
+        ◦ If the vehicle is on the right side, it should "turn left" to switch lanes if clear.
+Response Format (Strict Adherence Required):
+[Scene Analysis]
+- Detected Lane: {left/right}
+- Obstacle Present: {yes/no}
+- Obstacle Distance: {near/far}
+- Clearance Available: {yes/no}
+[Reasoning]
+- The vehicle is currently in the {left/right} lane.
+- An obstacle {is/is not} on the same lane and is located {near/far}.
+- The available space in the adjacent lane is {sufficient/insufficient}.
+- Based on these conditions, the optimal movement decision is: {decision from: "straight forward", "step forward", "step backward", "turn left", "turn right"}.
+[Final Decision]
+{decision}"""
+
+Version2:
+    user_prompt =  """<image_placeholder> Analyze the given image from the vehicle's front-facing camera by strictly following this guideline step by step: First determine if the vehicle is on the left or the right lane. Answer with this format: The vehicle is on the {left/right} lane.
+    Then determine if there is an obstacle directly ahead in the lane the vehicle is currently occupying. Answer with this format: There {is/is not} an obstacle ahead in the lane.
+    If an obstacle is present, determine if the obstacle is far away or close. Answer with this format: The obstacle is {far/close}.
+    Based on these conditions, decide the best movement option for the vehicle by following the guidelines below:
+    Guidelines for Decision Making:
+    - If no obstacles are detected in the current lane, the vehicle should continue moving "straight forward".
+    - If an obstacle is detected in the current lane (not the other lane) but it is still far away, the vehicle should "step forward" cautiously until there is no or very little space to the obstacle.
+    - If an obstacle is detected on the current lane and it is very close to the vehicle (there is no space between the vehicle and the obstacle), the vehicle should switch to the other lane by either "turn left" or "turn right" by following these steps:
+    - If the vehicle is currently on the left side, it should "turn right" to switch lanes if clear.
+    - If the vehicle is currently on the right side, it should "turn left" to switch lanes if clear.
+    Put the final decision in this format:
+    Based on these conditions, the optimal movement decision is: {straight forward/step forward/step backward/turn left/turn right}"""
+
+Version3:
+   user_prompt =  """<image_placeholder> Analyze the given image from a vehicle's front-facing camera to determine the best control action. Follow this guideline step by step: First determine if the vehicle is on the left or the right lane. Then determine if there is an obstacle directly ahead in the lane the vehicle is currently occupying. If an obstacle is present, determine if the obstacle is far away or close. Based on these conditions, decide the best control option for the vehicle with this format:"Based on the conditions of the vehicle, the best control option is: {straight forward/step forward/step backward/turn left/turn right}"
+Here are some examples you could follow:
+1) Based on the configuration of the road, the vehicle appears to be on the right lane. There is an obstacle on the road also on the right lane but it appears to be far away. Based on the conditions of the vehicle, the best control option is: "straight forward."
+2) Based on the configuration of the road, the vehicle appears to be on the left lane. There is an obstacle on the road also on the left lane and it appears to be very close to the vehicle. Based on the conditions of the vehicle, the best control option is: "turn right"
+3) Based on the configuration of the road, the vehicle appears to be on the left lane. There is an obstacle on the road but on the right lane and it appears to be far away from the vehicle. Since the obstacle is on the other lane and will not hinder the vehicle, the best control option is: 'straight forward'"""
