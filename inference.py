@@ -24,7 +24,8 @@ from deepseek_vl.models import MultiModalityCausalLM, VLChatProcessor
 from deepseek_vl.utils.io import load_pil_images
 
 # specify the path to the model
-model_path = "deepseek-ai/deepseek-vl-7b-chat"
+#model_path = "deepseek-ai/deepseek-vl-7b-chat"
+model_path = "deepseek-ai/deepseek-vl-1.3b-chat"
 vl_chat_processor: VLChatProcessor = VLChatProcessor.from_pretrained(model_path)
 tokenizer = vl_chat_processor.tokenizer
 
@@ -32,55 +33,65 @@ vl_gpt: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(
     model_path, trust_remote_code=True
 )
 vl_gpt = vl_gpt.to(torch.bfloat16).cuda().eval()
+prompt = """<image_placeholder>You are looking through the camera of a turtlebot3 burger robot inside a gazebo simulation environment.
+ The robot is on a road. Tell me do you see anything on the road standing in front of the bot? If there is something on the road that will
+ block the robot's path, that means the robot should change lane to the left or right. Based on what you see, tell me what the robot
+ should do and give your reasoning."""
 
-# single image conversation example
+# Initial conversation setup
 conversation = [
     {
         "role": "User",
-        "content": "<image_placeholder>Describe each stage of this image.",
-        "images": ["./images/training_pipelines.jpg"],
+        "content": "<image_placeholder>You are looking through the camera of a turtlebot3 burger robot inside a gazebo simulation environment. The robot is on a road. Tell me do you see anything on the road standing in front of the bot? If there is something on the road that will block the robot's path, that means the robot should change lane to the left or right. Based on what you see, tell me what the robot should do and give your reasoning.",
+        "images": ["./images/gazebo_image-1.png"],
     },
     {"role": "Assistant", "content": ""},
 ]
 
-# multiple images (or in-context learning) conversation example
-# conversation = [
-#     {
-#         "role": "User",
-#         "content": "<image_placeholder>A dog wearing nothing in the foreground, "
-#                    "<image_placeholder>a dog wearing a santa hat, "
-#                    "<image_placeholder>a dog wearing a wizard outfit, and "
-#                    "<image_placeholder>what's the dog wearing?",
-#         "images": [
-#             "images/dog_a.png",
-#             "images/dog_b.png",
-#             "images/dog_c.png",
-#             "images/dog_d.png",
-#         ],
-#     },
-#     {"role": "Assistant", "content": ""}
-# ]
+# Process each turn of conversation
+def get_model_response(conversation):
+    # Load images and prepare inputs
+    pil_images = load_pil_images(conversation)
+    prepare_inputs = vl_chat_processor(
+        conversations=conversation, images=pil_images, force_batchify=True
+    ).to(vl_gpt.device)
 
-# load images and prepare for inputs
-pil_images = load_pil_images(conversation)
-prepare_inputs = vl_chat_processor(
-    conversations=conversation, images=pil_images, force_batchify=True
-).to(vl_gpt.device)
+    # Get image embeddings
+    inputs_embeds = vl_gpt.prepare_inputs_embeds(**prepare_inputs)
 
-# run image encoder to get the image embeddings
-inputs_embeds = vl_gpt.prepare_inputs_embeds(**prepare_inputs)
+    # Generate response
+    outputs = vl_gpt.language_model.generate(
+        inputs_embeds=inputs_embeds,
+        attention_mask=prepare_inputs.attention_mask,
+        pad_token_id=tokenizer.eos_token_id,
+        bos_token_id=tokenizer.bos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+        max_new_tokens=512,
+        do_sample=False,
+        use_cache=True,
+    )
 
-# run the model to get the response
-outputs = vl_gpt.language_model.generate(
-    inputs_embeds=inputs_embeds,
-    attention_mask=prepare_inputs.attention_mask,
-    pad_token_id=tokenizer.eos_token_id,
-    bos_token_id=tokenizer.bos_token_id,
-    eos_token_id=tokenizer.eos_token_id,
-    max_new_tokens=512,
-    do_sample=False,
-    use_cache=True,
-)
+    # Decode the response
+    answer = tokenizer.decode(outputs[0].cpu().tolist(), skip_special_tokens=True)
+    return answer
 
-answer = tokenizer.decode(outputs[0].cpu().tolist(), skip_special_tokens=True)
-print(f"{prepare_inputs['sft_format'][0]}", answer)
+# Get first response
+first_response = get_model_response(conversation)
+conversation[1]["content"] = first_response
+
+# Add follow-up question
+conversation.extend([
+    {
+        "role": "User",
+        "content": "If there is something on the road in front of the robot, it likely means it will block the robot's path. Should the robot in this case change lane to the left or right?",
+    },
+    {"role": "Assistant", "content": ""},
+])
+
+# Get second response
+second_response = get_model_response(conversation)
+conversation[3]["content"] = second_response
+
+# Print the full conversation
+for message in conversation:
+    print(f"{message['role']}: {message['content']}\n")

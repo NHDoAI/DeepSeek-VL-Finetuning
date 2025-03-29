@@ -418,6 +418,9 @@ tags
 # Data folder
 data/
 
-
+#un-needed folders
+random_scripts/
+images/
+labels/
 
 
