@@ -10,6 +10,13 @@ from deepseek_vl.models import MultiModalityCausalLM, VLChatProcessor
 from peft import get_peft_model, LoraConfig
 from deepseek_vl.utils.io import load_pil_images
 
+import wandb
+
+wandb.init(
+    project="deepseek-vl-training",  # name of your project in wandb
+    name="test_wandb_log-every-4",            # optional: custom run name
+)
+
 def split_data_files(data_dir, eval_ratio=0.1, seed=42):
     """
     Split the data files into training and evaluation sets.
@@ -248,7 +255,26 @@ model = get_peft_model(model, lora_config, adapter_name="adapter")
 optimizer = bnb.optim.AdamW(model.parameters(), lr=2e-4) # paged optimizer
 num_epochs = 3
 eval_every = 5  # Evaluate every 50 batches
+
+wandb.config.update(
+    {                     # optional: hyperparameter logging
+        "batch_size": batch_size,
+        "num_epochs": num_epochs,
+        "eval_every": eval_every,
+        "learning_rate": 2e-4,
+        "optimizer": "AdamW (bnb)",
+        "quantization": "4-bit",
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "lora_dropout": 0.1
+    }
+
+)
+
+wandb.watch(model, log="all", log_freq=4)
+
 model.train()
+
 
 for epoch in range(num_epochs):
     total_train_loss = 0.0
@@ -289,7 +315,14 @@ for epoch in range(num_epochs):
         
         # Log current batch loss
         print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Loss: {loss.item():.4f}")
-        
+
+        wandb.log({
+            "train_loss": loss.item(),
+            "epoch": epoch + 1,
+            "step": epoch * len(train_dataloader) + batch_idx + 1
+        })
+
+
         # Evaluate periodically
         if (batch_idx + 1) % eval_every == 0:
             eval_loss = evaluate_model(model, eval_dataloader, model.device)
@@ -303,5 +336,12 @@ for epoch in range(num_epochs):
     
     print(f"Epoch {epoch+1}/{num_epochs} completed - Avg Train Loss: {avg_train_loss:.4f}, Eval Loss: {eval_loss:.4f}")
 
+    wandb.log({
+        "eval_loss": eval_loss,
+        "epoch": epoch + 1,
+        "eval_step": epoch * len(train_dataloader) + batch_idx + 1
+    })
+
 # Save the fine-tuned model
 #model.save_pretrained("fine_tuned_model_quantized")
+wandb.finish()

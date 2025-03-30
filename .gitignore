@@ -424,3 +424,4 @@ images/
 labels/
 output/
 inference_code/test_objects_detection/
+wandb/
