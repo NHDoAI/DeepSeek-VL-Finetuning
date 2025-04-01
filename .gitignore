@@ -425,3 +425,9 @@ labels/
 output/
 inference_code/test_objects_detection/
 wandb/
+test_images/
+test_labels/
+images_backup/
+images_smallset/
+labels_smallset/
+saved_model*/

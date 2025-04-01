@@ -1,6 +1,8 @@
 import json
 import os
 import random
+from dotenv import load_dotenv
+import time
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -12,10 +14,15 @@ from deepseek_vl.utils.io import load_pil_images
 
 import wandb
 
-wandb.init(
+run = wandb.init(
     project="deepseek-vl-training",  # name of your project in wandb
-    name="test_wandb_log-every-4",            # optional: custom run name
+    name="test_early_stop_run2",            # optional: custom run name
+    #mode="offline"
 )
+
+early_stop_flag = True #TODO:modify to use argparse later
+
+load_dotenv()
 
 def split_data_files(data_dir, eval_ratio=0.1, seed=42):
     """
@@ -175,8 +182,34 @@ def evaluate_model(model, eval_dataloader, device):
     model.train()
     return avg_loss
 
+class EarlyStopping: #fix according to chatgpt
+    def __init__(self, patience=3, delta=0, checkpoint_path="./best_model.pth"):
+        self.patience = patience
+        self.delta = delta
+        self.best_loss = float('inf')
+        self.counter = 0
+        self.early_stop = False
+        self.checkpoint_path = checkpoint_path
+
+    def save_checkpoint(self, model, batch_idx, epoch):
+        #save model when eval loss drops
+        model.save_pretrained(self.checkpoint_path)
+        print(f"Model saved to {self.checkpoint_path} at epoch {epoch} and batch {batch_idx}")
+
+    def check(self, val_loss):
+        if val_loss < self.best_loss - self.delta:
+            self.best_loss = val_loss
+            self.counter = 0
+            return True
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+            return False
+
 model_path = "deepseek-ai/deepseek-vl-1.3b-chat"
-labels_dir = "/home/ubuntu/deepseekVL/DeepSeek-VL/training_code/labels/"
+labels_dir = os.getenv('TRAIN_LABELS_PATH')
+test_labels_dir = os.getenv('TEST_LABELS_PATH') #to be changed for cluster path
 
 # --- Step 1: Prepare Your Dataset ---
 vl_chat_processor = VLChatProcessor.from_pretrained(model_path)
@@ -184,10 +217,13 @@ tokenizer = vl_chat_processor.tokenizer
 
 # Split data into train and eval sets
 train_files, eval_files = split_data_files(labels_dir, eval_ratio=0.2)
+test_files = [os.path.join(test_labels_dir, fname) for fname in os.listdir(test_labels_dir) if fname.endswith('.json')]
+
 
 # Create train and eval datasets
 train_dataset = MyMultimodalDataset(data_files=train_files, chat_processor=vl_chat_processor)
 eval_dataset = MyMultimodalDataset(data_files=eval_files, chat_processor=vl_chat_processor)
+test_dataset = MyMultimodalDataset(data_files=test_files, chat_processor=vl_chat_processor)
 
 # Create dataloaders
 batch_size = 1
@@ -199,6 +235,12 @@ train_dataloader = DataLoader(
 )
 eval_dataloader = DataLoader(
     eval_dataset, 
+    batch_size=batch_size, 
+    shuffle=False, 
+    collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
+)
+test_dataloader = DataLoader(
+    test_dataset, 
     batch_size=batch_size, 
     shuffle=False, 
     collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
@@ -253,8 +295,8 @@ model = get_peft_model(model, lora_config, adapter_name="adapter")
 # TODO: check what are all the hyperparameters to be defined and group them into a config file
 #optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4) # torch optimizer
 optimizer = bnb.optim.AdamW(model.parameters(), lr=2e-4) # paged optimizer
-num_epochs = 3
-eval_every = 5  # Evaluate every 50 batches
+num_epochs = 15
+eval_every = 4  # Evaluate every 50 batches
 
 wandb.config.update(
     {                     # optional: hyperparameter logging
@@ -271,10 +313,20 @@ wandb.config.update(
 
 )
 
+dataset_artifact = wandb.Artifact(name="test_data_artifact", type="dataset")
+dataset_artifact.add_dir("./images")
+dataset_artifact.add_dir("./labels")
+
 wandb.watch(model, log="all", log_freq=4)
 
+checkpoint_path = "./saved_model_testrun-2"
+
+start_time = time.time()
 model.train()
 
+
+if early_stop_flag:
+    early_stopper = EarlyStopping(patience=4, delta=0, checkpoint_path=checkpoint_path)
 
 for epoch in range(num_epochs):
     total_train_loss = 0.0
@@ -324,13 +376,49 @@ for epoch in range(num_epochs):
 
 
         # Evaluate periodically
+        # TODO: consider option to modify to evaluate every epoch instead
         if (batch_idx + 1) % eval_every == 0:
             eval_loss = evaluate_model(model, eval_dataloader, model.device)
             print(f"Evaluation - Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Eval Loss: {eval_loss:.4f}")
+
+            wandb.log({ 
+            "eval_loss": eval_loss,
+            "epoch": epoch + 1,
+            "step": epoch * len(train_dataloader) + batch_idx + 1
+            })
+
+            test_loss = evaluate_model(model, test_dataloader, model.device)
+            print(f"Test - Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Test Loss: {test_loss:.4f}")
+
+            wandb.log({ 
+            "test_loss": test_loss,
+            "epoch": epoch + 1,
+            "step": epoch * len(train_dataloader) + batch_idx + 1
+            })
+
+            if early_stop_flag:
+                if early_stopper.check(eval_loss):
+                    early_stopper.save_checkpoint(model, batch_idx+1, epoch+1)
+                else:
+                    if early_stopper.early_stop:
+                        print("eval stagnation exceeded patience, early stopping activated")
+                        break
+    
+
+    epoch_time = time.time() - start_time
+    print(f"Epoch {epoch+1}/{num_epochs} completed - Time: {epoch_time:.2f} seconds")
+
+    wandb.log({
+        "epoch_time": epoch_time,
+        })
     
     # Calculate average training loss for the epoch
     avg_train_loss = total_train_loss / num_batches if num_batches > 0 else 0
     
+    if early_stop_flag and early_stopper.early_stop:
+        print("Training stopped early!")
+        break
+
     # Evaluate at the end of each epoch
     eval_loss = evaluate_model(model, eval_dataloader, model.device)
     
@@ -342,6 +430,18 @@ for epoch in range(num_epochs):
         "eval_step": epoch * len(train_dataloader) + batch_idx + 1
     })
 
+    test_loss = evaluate_model(model, test_dataloader, model.device)
+
+    print(f"Test - Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Test Loss: {test_loss:.4f}")
+
+    wandb.log({ 
+    "test_loss": test_loss,
+    "epoch": epoch + 1,
+    "step": epoch * len(train_dataloader) + batch_idx + 1
+    })
+
+run.log_artifact(dataset_artifact)
 # Save the fine-tuned model
-#model.save_pretrained("fine_tuned_model_quantized")
+if not early_stop_flag:
+    model.save_pretrained("./fine_tuned_model_quantized")
 wandb.finish()
