@@ -16,7 +16,7 @@ import wandb
 
 run = wandb.init(
     project="deepseek-vl-training",  # name of your project in wandb
-    name="test_early_stop_run_epoch-eval",            # optional: custom run name
+    name="test_early_stop_run2",            # optional: custom run name
     #mode="offline"
 )
 
@@ -183,7 +183,7 @@ def evaluate_model(model, eval_dataloader, device):
     return avg_loss
 
 class EarlyStopping: #fix according to chatgpt
-    def __init__(self, patience=3, delta=0, checkpoint_path="./best_model"):
+    def __init__(self, patience=3, delta=0, checkpoint_path="./best_model.pth"):
         self.patience = patience
         self.delta = delta
         self.best_loss = float('inf')
@@ -191,10 +191,10 @@ class EarlyStopping: #fix according to chatgpt
         self.early_stop = False
         self.checkpoint_path = checkpoint_path
 
-    def save_checkpoint(self, model, epoch):
+    def save_checkpoint(self, model, batch_idx, epoch):
         #save model when eval loss drops
         model.save_pretrained(self.checkpoint_path)
-        print(f"Model saved to {self.checkpoint_path} at epoch {epoch}")
+        print(f"Model saved to {self.checkpoint_path} at epoch {epoch} and batch {batch_idx}")
 
     def check(self, val_loss):
         if val_loss < self.best_loss - self.delta:
@@ -295,12 +295,14 @@ model = get_peft_model(model, lora_config, adapter_name="adapter")
 # TODO: check what are all the hyperparameters to be defined and group them into a config file
 #optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4) # torch optimizer
 optimizer = bnb.optim.AdamW(model.parameters(), lr=2e-4) # paged optimizer
-num_epochs = 25
+num_epochs = 15
+eval_every = 4  # Evaluate every 50 batches
 
 wandb.config.update(
     {                     # optional: hyperparameter logging
         "batch_size": batch_size,
         "num_epochs": num_epochs,
+        "eval_every": eval_every,
         "learning_rate": 2e-4,
         "optimizer": "AdamW (bnb)",
         "quantization": "4-bit",
@@ -317,7 +319,7 @@ dataset_artifact.add_dir("./labels")
 
 wandb.watch(model, log="all", log_freq=4)
 
-checkpoint_path = "./saved_model_testrun-epoch-eval"
+checkpoint_path = "./saved_model_testrun-2"
 
 start_time = time.time()
 model.train()
@@ -372,6 +374,37 @@ for epoch in range(num_epochs):
             "step": epoch * len(train_dataloader) + batch_idx + 1
         })
 
+
+        # Evaluate periodically
+        # TODO: consider option to modify to evaluate every epoch instead
+        if (batch_idx + 1) % eval_every == 0:
+            eval_loss = evaluate_model(model, eval_dataloader, model.device)
+            print(f"Evaluation - Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Eval Loss: {eval_loss:.4f}")
+
+            wandb.log({ 
+            "eval_loss": eval_loss,
+            "epoch": epoch + 1,
+            "step": epoch * len(train_dataloader) + batch_idx + 1
+            })
+
+            test_loss = evaluate_model(model, test_dataloader, model.device)
+            print(f"Test - Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Test Loss: {test_loss:.4f}")
+
+            wandb.log({ 
+            "test_loss": test_loss,
+            "epoch": epoch + 1,
+            "step": epoch * len(train_dataloader) + batch_idx + 1
+            })
+
+            if early_stop_flag:
+                if early_stopper.check(eval_loss):
+                    early_stopper.save_checkpoint(model, batch_idx+1, epoch+1)
+                else:
+                    if early_stopper.early_stop:
+                        print("eval stagnation exceeded patience, early stopping activated")
+                        break
+    
+
     epoch_time = time.time() - start_time
     print(f"Epoch {epoch+1}/{num_epochs} completed - Time: {epoch_time:.2f} seconds")
 
@@ -379,35 +412,33 @@ for epoch in range(num_epochs):
         "epoch_time": epoch_time,
         })
     
+    # Calculate average training loss for the epoch
     avg_train_loss = total_train_loss / num_batches if num_batches > 0 else 0
+    
+    if early_stop_flag and early_stopper.early_stop:
+        print("Training stopped early!")
+        break
 
+    # Evaluate at the end of each epoch
     eval_loss = evaluate_model(model, eval_dataloader, model.device)
-    print(f"Evaluation - Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Eval Loss: {eval_loss:.4f}")
+    
+    print(f"Epoch {epoch+1}/{num_epochs} completed - Avg Train Loss: {avg_train_loss:.4f}, Eval Loss: {eval_loss:.4f}")
 
-    wandb.log({ 
-    "eval_loss": eval_loss,
-    "epoch": epoch + 1,
-    "step": epoch * len(train_dataloader) + batch_idx + 1
-        })
+    wandb.log({
+        "eval_loss": eval_loss,
+        "epoch": epoch + 1,
+        "eval_step": epoch * len(train_dataloader) + batch_idx + 1
+    })
 
     test_loss = evaluate_model(model, test_dataloader, model.device)
+
     print(f"Test - Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Test Loss: {test_loss:.4f}")
 
     wandb.log({ 
     "test_loss": test_loss,
     "epoch": epoch + 1,
     "step": epoch * len(train_dataloader) + batch_idx + 1
-        })
-    
-    if early_stop_flag:
-        if early_stopper.check(eval_loss):
-            early_stopper.save_checkpoint(model=model, epoch=epoch+1)
-        else:
-            if early_stopper.early_stop:
-                print("eval stagnation exceeded patience, early stopping activated")
-                break
-
-
+    })
 
 run.log_artifact(dataset_artifact)
 # Save the fine-tuned model
