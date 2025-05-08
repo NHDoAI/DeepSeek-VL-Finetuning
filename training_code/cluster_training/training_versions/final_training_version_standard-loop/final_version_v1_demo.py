@@ -218,6 +218,7 @@ def evaluate_model(model, eval_dataloader, device):
             labels = batch["input_ids"].clone()
             # For each sequence in the batch, mask out the first 1014 tokens
             labels[:, 0:1014] = -100
+            labels = labels.masked_fill(batch["attention_mask"] == 0, -100)
             batch["labels"] = labels
 
             # Forward pass through language model
@@ -242,7 +243,7 @@ def evaluate_model(model, eval_dataloader, device):
     return avg_loss
 
 # --- Class for early stopping ---
-class EarlyStopping: #fix according to chatgpt
+class EarlyStopping:
     def __init__(self, patience=3, delta=0, checkpoint_path="./best_model"):
         self.patience = patience
         self.delta = delta
@@ -250,17 +251,18 @@ class EarlyStopping: #fix according to chatgpt
         self.counter = 0
         self.early_stop = False
         self.checkpoint_path = checkpoint_path
-        self.best_epoch = -1
+        self.best_step = -1  # Track best step instead of best epoch
 
-    def save_checkpoint(self, model, epoch):
-        #save model when eval loss drops
+    def save_checkpoint(self, model, step, epoch=None):
+        # Save model when eval loss drops
         model.save_pretrained(self.checkpoint_path)
-        self.best_epoch = epoch
+        self.best_step = step
         
-        # Save metadata with epoch information
+        # Save metadata with step information
         metadata = {
-            "epoch": epoch,
-            "best_epoch": self.best_epoch,
+            "step": step,
+            "epoch": epoch,  # Still track epoch for reference
+            "best_step": self.best_step,
             "best_loss": self.best_loss,
             "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -269,9 +271,9 @@ class EarlyStopping: #fix according to chatgpt
             json.dump(metadata, f, indent=4)
             
         # Log to wandb
-        #wandb.log({"best_model_epoch": epoch, "best_model_loss": self.best_loss})
+        wandb.log({"best_model_step": step, "best_model_loss": self.best_loss})
         
-        print(f"Earlystop Model saved to {self.checkpoint_path} at epoch {self.best_epoch}")
+        print(f"Earlystop Model saved to {self.checkpoint_path} at step {self.best_step} (epoch {epoch})")
 
     def check(self, val_loss):
         if val_loss < self.best_loss - self.delta:
@@ -584,6 +586,7 @@ for epoch in range(num_epochs): # epochs loop
         labels = batch["input_ids"].clone()
         # For each sequence in the batch, mask out the first 1014 tokens
         labels[:, 0:1014] = -100
+        labels = labels.masked_fill(batch["attention_mask"] == 0, -100)
         batch["labels"] = labels
     
         # if cluster_flag:
@@ -647,6 +650,11 @@ for epoch in range(num_epochs): # epochs loop
             "epoch": epoch + 1,
             "step": global_step
         })
+        del inputs_embeds
+        del batch
+        del outputs
+        del loss
+        torch.cuda.empty_cache()
         
         # Evaluate model every eval_every_n_steps
         if global_step % eval_every_n_steps == 0:
@@ -671,25 +679,13 @@ for epoch in range(num_epochs): # epochs loop
             # Check early stopping
             if early_stop_flag:
                 if early_stopper.check(eval_loss):
-                    early_stopper.save_checkpoint(model=model, epoch=epoch+1)
-                    # Additional metadata for step-based checkpoint
-                    with open(os.path.join(checkpoint_path, "checkpoint_metadata.json"), "r") as f:
-                        metadata = json.load(f)
-                    
-                    metadata["step"] = global_step
-                    
-                    with open(os.path.join(checkpoint_path, "checkpoint_metadata.json"), "w") as f:
-                        json.dump(metadata, f, indent=4)
+                    early_stopper.save_checkpoint(model=model, step=global_step, epoch=epoch+1)
                 else:
                     if early_stopper.early_stop:
-                        print("Eval stagnation exceeded patience, early stopping activated")
+                        print(f"Eval stagnation exceeded patience at step {global_step}, early stopping activated")
                         break
         
-        del inputs_embeds
-        del batch
-        del outputs
-        del loss
-        torch.cuda.empty_cache()
+
 
     # If early stopping was triggered, break out of the epoch loop too
     if early_stop_flag and early_stopper.early_stop:
