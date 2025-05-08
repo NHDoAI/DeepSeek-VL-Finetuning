@@ -1,0 +1,732 @@
+import json
+import os
+import random
+from dotenv import load_dotenv
+import time
+import subprocess
+
+import torch
+from torch.utils.data import DataLoader, Dataset
+import bitsandbytes as bnb
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoConfig
+from deepseek_vl.models import MultiModalityCausalLM, VLChatProcessor
+from peft import get_peft_model, LoraConfig
+from deepseek_vl.utils.io import load_pil_images
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+import wandb
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+cluster_flag = True
+model_type = "1.3B"
+checkpoint_dir = "./1.3b_lr-scheduler_accumulated-grads/"
+
+# ------ Define useful functions and classes ------
+
+# --- Function to log memory usage ---
+def log_memory(prefix=""):
+    device = torch.device("cuda:0")
+    properties = torch.cuda.get_device_properties(device)
+    total_memory = properties.total_memory / (1024**2)  # Total memory in bytes
+    reserved_memory = torch.cuda.memory_reserved(device) / (1024**2) # Reserved memory in bytes
+    allocated_memory = torch.cuda.memory_allocated(device) / (1024**2) # Allocated memory in bytes
+    #free_memory = reserved_memory - allocated_memory  # Free memory in reserved space
+    # allocated = torch.cuda.memory_allocated() / (1024**2)  # In MB
+    # reserved = torch.cuda.memory_reserved() / (1024**2)    # In MB
+    print(f"{prefix} GPU Memory - Total: {total_memory:.2f} MB | Allocated: {allocated_memory:.2f} MB | Reserved: {reserved_memory:.2f} MB") #| Free: {free_memory:.2f} MB
+
+def get_gpu_memory_info(gpu_id):
+    """
+    Uses nvidia-smi to query memory details for a specific GPU.
+    The `-i` option specifies the GPU index.
+    """
+    try:
+        # Query memory info for the specified GPU.
+        # The '--format=csv,noheader,nounits' flag provides a clean CSV without extra headers or units.
+        cmd = [
+            'nvidia-smi',
+            '-i', str(gpu_id),
+            '--query-gpu=memory.total,memory.used,memory.free',
+            '--format=csv,noheader,nounits'
+        ]
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        # Expecting one line of CSV output for memory info, e.g., "11178, 230, 10948"
+        line = result.stdout.strip()
+        total, used, free = [item.strip() for item in line.split(',')]
+        return {
+            'Memory Total (MiB)': total,
+            'Memory Used (MiB)': used,
+            'Memory Free (MiB)': free
+        }
+    except subprocess.CalledProcessError as e:
+        print("Error executing nvidia-smi:", e.stderr)
+        return None
+    except Exception as e:
+        print("Unexpected error:", e)
+        return None
+
+# --- Function to split data files into training and evaluation sets, currently not used ---
+def split_data_files(data_dir, eval_ratio=0.1, seed=42):
+    """
+    Split the data files into training and evaluation sets.
+    
+    Args:
+        data_dir (str): Directory containing the JSON data files.
+        eval_ratio (float): Proportion of data to use for evaluation.
+        seed (int): Random seed for reproducibility.
+        
+    Returns:
+        tuple: Lists of file paths for training and evaluation.
+    """
+    random.seed(seed)
+    
+    data_files = [os.path.join(data_dir, fname) for fname in os.listdir(data_dir) if fname.endswith('.json')]
+    random.shuffle(data_files)
+    
+    split_idx = int(len(data_files) * (1 - eval_ratio))
+    train_files = data_files[:split_idx]
+    eval_files = data_files[split_idx:]
+    
+    print(f"Dataset split: {len(train_files)} training files, {len(eval_files)} evaluation files")
+    return train_files, eval_files
+
+# --- Custom dataset class for loading and processing data ---
+class MyMultimodalDataset(Dataset):
+    def __init__(self, data_files, chat_processor):
+        """
+        Args:
+            data_files (list): List of paths to JSON files containing examples.
+            chat_processor (VLChatProcessor): An instance that handles image and text processing.
+        """
+        self.chat_processor = chat_processor
+        self.data_files = data_files
+
+    def __len__(self):
+        return len(self.data_files)
+    
+    def __getitem__(self, idx):
+        json_data_path = self.data_files[idx]
+
+        with open(json_data_path, "r") as label_file:
+            label_data = json.load(label_file)
+        
+        conversation = label_data["conversation"]
+
+        pil_images = load_pil_images(conversation)
+
+        inputs = self.chat_processor(
+            conversations=conversation,
+            images=pil_images,
+            force_batchify=True  # Ensures outputs are in a batch-ready format.
+        )
+        return inputs
+    
+# --- Custom collate function for padding and concatenating tensors ---
+def custom_collate_fn(batch, pad_keys=None, pad_values=None, tokenizer=None):
+    """
+    Collate a list of samples (each a dict) into a batch.
+    
+    Args:
+        batch (list): List of sample dictionaries.
+        pad_keys (list, optional): List of keys that need to be padded along dimension 1.
+                                   Default: ["input_ids", "attention_mask", "images_seq_mask"]
+        pad_values (dict, optional): A dictionary mapping each pad key to a pad value.
+                                     Default for:
+                                        "input_ids": batch[0]["pad_id"] (if available, otherwise 0),
+                                        "attention_mask": 0,
+                                        "images_seq_mask": 0.
+    
+    Returns:
+        dict: A batch dictionary with padded tensors for keys in pad_keys and concatenated tensors for others.
+    """
+    # Set defaults if not provided.
+    if pad_keys is None:
+        pad_keys = ["input_ids", "attention_mask", "images_seq_mask"]
+    if pad_values is None:
+        pad_values = {}
+        for key in pad_keys:
+            if key == "input_ids":
+                pad_values[key] = tokenizer.eos_token_id if tokenizer is not None else 0
+            elif key in ["attention_mask", "images_seq_mask"]:
+                pad_values[key] = 0
+            else:
+                pad_values[key] = 0
+
+    padded_batch = {}
+    for key in batch[0].keys():
+        # If this key should be padded and is a tensor.
+        if key in pad_keys and isinstance(batch[0][key], torch.Tensor):
+            # Compute maximum sequence length along dimension 1 (the sequence dimension).
+            max_len = max(sample[key].shape[1] for sample in batch)
+            padded_tensors = []
+            for sample in batch:
+                tensor = sample[key]
+                seq_len = tensor.shape[1]
+                pad_size = max_len - seq_len
+                if pad_size > 0:
+                    pad = torch.full((tensor.shape[0], pad_size), pad_values[key], dtype=tensor.dtype)
+                    tensor = torch.cat([tensor, pad], dim=1)
+                padded_tensors.append(tensor)
+            # Concatenate padded tensors along the batch dimension (dimension 0).
+            padded_batch[key] = torch.cat(padded_tensors, dim=0)
+        elif isinstance(batch[0][key], torch.Tensor):
+            # For tensor keys that do NOT require padding (e.g., pixel_values, images_emb_mask)
+            padded_batch[key] = torch.cat([sample[key] for sample in batch], dim=0)
+        else:
+            # For non-tensor keys, just put them in a list.
+            padded_batch[key] = [sample[key] for sample in batch]
+    return padded_batch
+
+# --- Function to evaluate the model's performance ---
+def evaluate_model(model, eval_dataloader, device):
+    """
+    Evaluate the model on the evaluation dataset.
+    
+    Args:
+        model: The model to evaluate.
+        eval_dataloader: DataLoader for the evaluation dataset.
+        device: The device to run evaluation on.
+        
+    Returns:
+        float: Average evaluation loss.
+    """
+    model.eval()
+    total_loss = 0.0
+    total_samples = 0
+    
+    with torch.no_grad():
+        for batch in eval_dataloader:
+            current_batch_size = batch["input_ids"].shape[0]
+            batch = {k: v.to(model.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+            if 'pixel_values' in batch:
+                batch['pixel_values'] = batch['pixel_values'].to(torch.float16)
+            inputs_embeds = model.prepare_inputs_embeds(**batch)
+        
+            del batch["pixel_values"]
+            labels = batch["input_ids"].clone()
+            # For each sequence in the batch, mask out the first 1014 tokens
+            labels[:, 0:1014] = -100
+            batch["labels"] = labels
+
+            # Forward pass through language model
+            outputs = model.language_model(
+                inputs_embeds=inputs_embeds,
+                attention_mask=batch['attention_mask'],
+                labels= batch["labels"]  
+            )
+            
+            loss = outputs.loss
+            total_loss += loss.item()*current_batch_size
+            total_samples += current_batch_size
+            del inputs_embeds
+            del batch
+            del outputs
+            del loss
+            torch.cuda.empty_cache()
+
+    
+    avg_loss = total_loss / total_samples if total_samples > 0 else 0
+    model.train()
+    return avg_loss
+
+# --- Class for early stopping ---
+class EarlyStopping:
+    def __init__(self, final_patience=3, delta=0, checkpoint_path="./best_model"):
+        self.final_patience = final_patience
+        self.delta = delta
+        self.best_loss = float('inf')
+        self.counter = 0
+        self.early_stop = False
+        self.checkpoint_path = checkpoint_path
+        self.best_epoch = -1
+
+    def save_checkpoint(self, model, epoch):
+        #save model when eval loss drops
+        model.save_pretrained(self.checkpoint_path)
+        self.best_epoch = epoch
+        
+        # Save metadata with epoch information
+        metadata = {
+            "saved_epoch": epoch,
+            "best_epoch": self.best_epoch,
+            "best_loss": self.best_loss,
+            "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        # Save metadata to a JSON file
+        with open(os.path.join(self.checkpoint_path, "checkpoint_metadata.json"), "w") as f:
+            json.dump(metadata, f, indent=4)
+            
+        # Log to wandb
+        #wandb.log({"best_model_epoch": epoch, "best_model_loss": self.best_loss})
+        
+        print(f"Model saved to {self.checkpoint_path} at epoch {self.best_epoch}")
+
+    def check(self, val_loss):
+        """Checks if the validation loss improved. Returns True if improved, False otherwise."""
+        if val_loss < self.best_loss - self.delta:
+            self.best_loss = val_loss
+            self.counter = 0
+            return True
+        else:
+            self.counter += 1
+            return False
+        
+#---------------------------------------------------main code body ---------------------------------------------------
+
+# ------ Load/initialize objects ------
+run_name = "1.3B_lr-scheduler_accumulated-grads_v1"
+batch_size = 4
+num_epochs = 30
+learning_rate = 2e-4
+lora_rank = 6
+lora_alpha = 12
+lora_dropout = 0.15
+# --- Scheduler and Early Stopping Hyperparameters ---
+lr_scheduler_patience = 2
+lr_scheduler_factor = 0.5
+min_lr = 1e-6
+early_stopping_patience = 4
+max_lr_reductions = 3
+# --- Gradient Accumulation ---
+accum_steps = 4
+
+hparams ={
+# optional: hyperparameter logging
+"run_name": run_name,
+"batch_size": batch_size,
+"accum_steps": accum_steps,
+"num_epochs": num_epochs,
+"learning_rate": learning_rate,
+"optimizer": "AdamW (bnb)",
+"quantization": "4-bit",
+"lora_r": lora_rank,
+"lora_alpha": lora_alpha,
+"lora_dropout": lora_dropout,
+"lr_scheduler_patience": lr_scheduler_patience,
+"lr_scheduler_factor": lr_scheduler_factor,
+"min_lr": min_lr,
+"early_stopping_patience": early_stopping_patience,
+"max_lr_reductions": max_lr_reductions
+    }
+    
+
+
+
+# --- Initialize wandb ---
+run = wandb.init(
+    project="deepseek-vl-training",  # name of your project in wandb
+    name=run_name,            # optional: custom run name
+    config=hparams
+)
+
+# --- Load environment variables ---
+load_dotenv(override=True)
+
+# --- Get the name of the GPU ---
+gpu_id = torch.cuda.current_device()
+device_name = torch.cuda.get_device_name(gpu_id)  # 0 is the device index
+
+if not cluster_flag:
+    print(f"CUDA Device Name: {device_name}")
+    gpu_memory = get_gpu_memory_info(gpu_id)
+    print(f"PyTorch is using GPU {gpu_id}:")
+    print(gpu_memory)
+else:
+    log_memory("Before original model load:")
+
+# --- Load model related objects ---
+
+# --- model path ---
+if model_type == "7B":
+    model_path = os.getenv('MODEL_7B_CHKPOINT')
+elif model_type == "1.3B":
+    model_path = os.getenv('MODEL_1.3B_CHKPOINT')
+
+# --- Load chat processor and tokenizer from model path ---
+vl_chat_processor = VLChatProcessor.from_pretrained(model_path)
+tokenizer = vl_chat_processor.tokenizer
+
+
+# --- Define the Quantization Configuration ---
+
+# --- 8 bit version ---
+
+# quantization_config = BitsAndBytesConfig(
+#     load_in_8bit=True,  # Alternatively, use load_in_8bit=True if preferred
+#     llm_int8_skip_modules=["vision_model", "aligner"]  # Skip quantizing vision and aligner modules
+# )
+
+# --- 4 bit version ---
+
+quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_use_double_quant=True,
+        # Note: llm_int8_skip_modules is ignored in 4-bit mode.
+    )
+
+# --- Auto load config of the model ---
+config = AutoConfig.from_pretrained(model_path)
+# --- Set definition of special tokens ---
+config.pad_token_id = tokenizer.eos_token_id
+config.eos_token_id = tokenizer.eos_token_id
+config.bos_token_id = tokenizer.bos_token_id
+
+# --- Create quantized model based on configs ---
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_path,
+    trust_remote_code=True,
+    quantization_config=quantization_config,
+    config=config,
+    device_map="auto"
+)
+
+# --- Log memory usage after loading the model ---
+# if not cluster_flag:
+#     print("After original model loading:")
+#     gpu_memory = get_gpu_memory_info(gpu_id)
+#     print(f"PyTorch is using GPU {gpu_id}:")
+#     print(gpu_memory)
+# else:
+#     log_memory("After original model loading:")
+
+
+# TODO: test Lora and how to apply to different layers, how to freeze some module
+# --- Apply LoRA Adapters to the Modules via configs ---
+
+
+
+if model_type == "1.3B":
+    # --- 1.3b model ---
+    lora_config = LoraConfig(
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                        "gate_proj", "up_proj", "down_proj",
+                        "attn.qkv", "attn.proj", "fc1", "fc2","patch_embed.proj", "attn_pool.q", "attn_pool.kv",
+                        #"aligner.layers.0", "aligner.layers.2"
+                        ],
+        lora_dropout=lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM"
+    )
+elif model_type == "7B":
+    # --- 7b model ---
+    lora_config = LoraConfig(
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", #language model
+                        "gate_proj", "up_proj", "down_proj", #language model
+                        "attn.qkv", "attn.proj", "fc1", "fc2","patch_embed.proj", "attn_pool.q", "attn_pool.kv", #vision model
+                        #"aligner.high_up_proj", "aligner.low_up_proj", "aligner.layers.1"
+                        ], #aligner
+        lora_dropout=lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM"
+    )
+
+
+# --- Load Model with LoRA Adapters ---
+model = get_peft_model(model, lora_config, adapter_name="adapter")
+
+# --- Define checkpoint path for saving the model-checkpoints ---
+best_checkpoint_path = "best-eval/"
+checkpoint_path = checkpoint_dir + best_checkpoint_path
+# --- Log memory usage after LoRA model is created---
+# if cluster_flag:
+#     log_memory("After LoRA model loading:")
+# else:
+#     print("After LoRA model loading:")
+#     gpu_memory = get_gpu_memory_info(gpu_id)
+#     print(f"PyTorch is using GPU {gpu_id}:")
+#     print(gpu_memory)
+
+# --- Prepare Training Loop ---
+# TODO: check what are all the hyperparameters to be defined and group them into a config file
+
+# --- Prepare Datasets ---
+
+train_labels_dir = os.getenv('TRAIN_LABELS_PATH')
+#print(train_labels_dir)
+eval_labels_dir = os.getenv('EVAL_LABELS_PATH')
+#print(eval_labels_dir)
+test_labels_dir = os.getenv('TEST_LABELS_PATH') #to be changed for cluster path
+#print(test_labels_dir)
+
+# Split data into train and eval sets
+#train_files, eval_files = split_data_files(labels_dir, eval_ratio=0.2)
+
+train_files = [os.path.join(train_labels_dir, fname) for fname in os.listdir(train_labels_dir) if fname.endswith('.json')]
+eval_files = [os.path.join(eval_labels_dir, fname) for fname in os.listdir(eval_labels_dir) if fname.endswith('.json')]
+test_files = [os.path.join(test_labels_dir, fname) for fname in os.listdir(test_labels_dir) if fname.endswith('.json')]
+
+# Create train and eval datasets
+train_dataset = MyMultimodalDataset(data_files=train_files, chat_processor=vl_chat_processor)
+eval_dataset = MyMultimodalDataset(data_files=eval_files, chat_processor=vl_chat_processor)
+test_dataset = MyMultimodalDataset(data_files=test_files, chat_processor=vl_chat_processor)
+
+# Before the loop - only create dataloader references but not the actual dataset yet
+
+train_dataloader = None  # Will be created in the first epoch
+
+eval_dataloader = DataLoader(
+    eval_dataset, 
+    batch_size=batch_size,
+    shuffle=False, 
+    collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
+)
+test_dataloader = DataLoader(
+    test_dataset, 
+    batch_size=batch_size, 
+    shuffle=False, 
+    collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
+)
+
+# --- Add artifacts to wandb ---
+dataset_artifact = wandb.Artifact(name="test_data_artifact", type="dataset")
+dataset_artifact.add_dir("./train/images")
+dataset_artifact.add_dir("./train/labels")
+dataset_artifact.add_dir("./eval/images")
+dataset_artifact.add_dir("./eval/labels")
+dataset_artifact.add_dir("./test/images")
+dataset_artifact.add_dir("./test/labels")
+
+# --- Define number of epochs ---
+
+#optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4) # torch optimizer
+optimizer = bnb.optim.AdamW(model.parameters(), lr=learning_rate) # paged optimizer
+optimizer.zero_grad() 
+
+# --- Initialize Learning Rate Scheduler ---
+scheduler = ReduceLROnPlateau(
+    optimizer,
+    mode='min',
+    factor=lr_scheduler_factor,
+    patience=lr_scheduler_patience,
+    verbose=True,
+    min_lr=min_lr
+)
+
+
+wandb.watch(model, log="parameters", log_freq=10)
+
+start_time = time.time()
+model.train()
+
+# --- Enable/Disable early stopping ---
+early_stop_flag = True #TODO:modify to use argparse later
+
+if early_stop_flag:
+    # Initialize EarlyStopping with the final patience value
+    early_stopper = EarlyStopping(final_patience=early_stopping_patience, delta=0.0001, checkpoint_path=checkpoint_path)
+
+
+# --- Training Loop ---
+
+avg_train_loss = 0.0
+eval_loss = 0.0
+test_loss = 0.0
+lr_reduction_count = 0
+
+
+for epoch in range(num_epochs):
+    # Create shuffled dataset at the beginning of each epoch
+    random.shuffle(train_files)
+    train_dataset = MyMultimodalDataset(data_files=train_files, chat_processor=vl_chat_processor)
+    train_dataloader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
+    )
+    
+    total_train_loss = 0.0
+    num_batches = 0
+    total_samples = 0
+    
+    for batch_idx, batch in enumerate(train_dataloader):
+        current_batch_size = batch["input_ids"].shape[0]
+
+        batch = {k: v.to(model.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+
+        if 'pixel_values' in batch:
+            batch['pixel_values'] = batch['pixel_values'].to(torch.float16)
+
+        # Prepare input embeddings using the model's method
+        inputs_embeds = model.prepare_inputs_embeds(**batch)
+        del batch["pixel_values"]
+
+        labels = batch["input_ids"].clone()
+        # For each sequence in the batch, mask out the first 1014 tokens
+        labels[:, 0:1014] = -100
+        batch["labels"] = labels
+    
+        # Forward pass through language model
+        outputs = model.language_model(
+            inputs_embeds=inputs_embeds,
+            attention_mask=batch['attention_mask'],
+            labels= batch["labels"]  
+        )
+        # if cluster_flag:
+        #     log_memory("After forward pass:")   
+        # else:
+        #     print("After forward pass:")
+        #     gpu_memory = get_gpu_memory_info(gpu_id)
+        #     print(f"PyTorch is using GPU {gpu_id}:")
+        #     print(gpu_memory)
+
+        loss = outputs.loss
+        scaled_loss  = loss / accum_steps 
+        scaled_loss.backward()
+
+        if cluster_flag:
+            log_memory("After loss backward:")
+        else:
+            print("After loss backward:")
+            gpu_memory = get_gpu_memory_info(gpu_id)
+            print(f"PyTorch is using GPU {gpu_id}:")
+            print(gpu_memory)
+
+        # --- PRINT GRADIENT NORMS TO VERIFY ACCUMULATION ---
+        total_norm = 0.0
+        for name, param in model.named_parameters():
+            if param.grad is not None:
+                # L2 norm of this parameter’s gradient
+                param_norm = param.grad.data.norm(2).item()
+                total_norm += param_norm ** 2
+        total_norm = total_norm ** 0.5
+        print(f"[micro-step {batch_idx+1}] accumulated grad norm = {total_norm:.4f}")
+
+        if (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(train_dataloader):
+            optimizer.step()
+            optimizer.zero_grad()
+
+        # if cluster_flag:
+        #     log_memory("After parameters update:")
+        # else:
+        #     print("After parameters update:")
+        #     gpu_memory = get_gpu_memory_info(gpu_id)
+        #     print(f"PyTorch is using GPU {gpu_id}:")
+        #     print(gpu_memory)
+
+        total_train_loss += loss.item()*current_batch_size
+        total_samples += current_batch_size
+        num_batches += 1
+
+        # Log current batch loss
+        print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Loss: {loss.item():.4f}")
+
+        wandb.log({
+            "train_loss": loss.item(),
+            "epoch": epoch + 1,
+            "step": epoch * len(train_dataloader) + batch_idx + 1
+        })
+        del inputs_embeds, batch, outputs, loss
+        torch.cuda.empty_cache()
+
+    epoch_time = time.time() - start_time
+    print(f"Epoch {epoch+1}/{num_epochs} completed - Time: {epoch_time:.2f} seconds")
+    
+    avg_train_loss = total_train_loss / total_samples if total_samples > 0 else 0 # avg epoch loss
+
+    # --- Evaluate model on eval set ---
+    eval_loss = evaluate_model(model, eval_dataloader, model.device)
+    print(f"Evaluation - Epoch {epoch+1}/{num_epochs}, Eval Loss: {eval_loss:.4f}")
+
+    # --- Get current learning rate ---
+    current_lr = optimizer.param_groups[0]['lr']
+
+    wandb.log({
+    "eval_loss": eval_loss,
+    "learning_rate": current_lr,
+    "epoch": epoch + 1,
+    })
+
+    # --- Evaluate model on test set ---
+    test_loss = evaluate_model(model, test_dataloader, model.device)
+    print(f"Test - Epoch {epoch+1}/{num_epochs}, Test Loss: {test_loss:.4f}")
+
+    wandb.log({
+    "test_loss": test_loss,
+    "epoch": epoch + 1,
+    })
+
+    # --- First Epoch Checkpoint Saving (remains the same) ---
+    if epoch == 0:
+        first_epoch_chkpt = "first_epoch_chkpoint/"
+        first_epoch_chkpt_path = checkpoint_dir + first_epoch_chkpt
+
+        model.save_pretrained(first_epoch_chkpt_path)
+        print(f"First epoch checkpoint saved to {first_epoch_chkpt_path} at time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        # Add metadata about this checkpoint
+        metadata = {
+            "epoch": epoch+1,
+            "train_loss": avg_train_loss,
+            "eval_loss": eval_loss,
+            "test_loss": test_loss,
+            "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        with open(os.path.join(first_epoch_chkpt_path, "checkpoint_metadata.json"), "w") as f:
+            json.dump(metadata, f, indent=4)
+        wandb.log({"first_epoch_checkpoint_saved": True})
+
+    # --- Learning Rate Scheduler and Early Stopping Logic ---
+    if early_stop_flag:
+        # Step the scheduler with the evaluation loss
+        scheduler.step(eval_loss)
+
+        # Check if LR was reduced
+        new_lr = optimizer.param_groups[0]['lr']
+        if new_lr < current_lr:
+            print(f"Learning rate reduced from {current_lr} to {new_lr}")
+            lr_reduction_count += 1
+            wandb.log({"lr_reduction_count": lr_reduction_count, "epoch": epoch + 1})
+
+        # Check if the evaluation loss improved using the early stopper
+        improved = early_stopper.check(eval_loss)
+        if improved:
+            # If loss improved, save the checkpoint
+            print(f"Evaluation loss improved to {eval_loss:.4f}. Saving model...")
+            early_stopper.save_checkpoint(model=model, epoch=epoch+1)
+        else:
+            # If loss did not improve, check for early stopping condition
+            print(f"Evaluation loss did not improve. Current patience counter: {early_stopper.counter}/{early_stopper.final_patience}")
+            if lr_reduction_count >= max_lr_reductions and early_stopper.counter >= early_stopper.final_patience:
+                print(f"Early stopping triggered: LR reduced {lr_reduction_count} times and eval loss hasn't improved for {early_stopper.final_patience} epochs.")
+                early_stopper.early_stop = True
+                break
+            elif early_stopper.counter >= early_stopper.final_patience:
+                 print(f"Eval loss hasn't improved for {early_stopper.final_patience} epochs, but max LR reductions ({lr_reduction_count}/{max_lr_reductions}) not reached yet. Continuing.")
+
+
+# --- Log artifacts to wandb ---
+run.log_artifact(dataset_artifact)
+
+# Save the fine-tuned model
+if not early_stop_flag:
+    final_checkpoint_path = "./fine_tuned_model_quantized"
+    model.save_pretrained(final_checkpoint_path)
+    
+    # Save metadata about the final checkpoint
+    metadata = {
+        "final_epoch": num_epochs,
+        "train_loss": avg_train_loss,
+        "eval_loss": eval_loss,
+        "test_loss": test_loss,
+        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    with open(os.path.join(final_checkpoint_path, "checkpoint_metadata.json"), "w") as f:
+        json.dump(metadata, f, indent=4)
+    
+    wandb.log({"final_model_epoch": num_epochs, "final_model_loss": eval_loss})
+
+wandb.finish()

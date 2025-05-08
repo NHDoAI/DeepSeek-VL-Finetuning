@@ -1,0 +1,15 @@
+{
+    "conversation": [
+        {
+            "role": "User",
+            "content": "<image_placeholder> Analyze the given image from the vehicle's front-facing camera. First determine if the vehicle is on the left or the right lane. Then determine if there is an obstacle directly ahead in the lane the vehicle is currently occupying or not. If an obstacle is present, determine how far away the obstacle is and decide the best movement option to keep going forward or switch to the other lane or navigate safely.\n    Guidelines for Decision Making:\n    1) First determine if the vehicle is currently on the right lane or left lane of the road.\n    2) Then determine if no obstacle is detected in the current lane or if it is far away, then the vehicle should continue moving \"straight forward\".\n    3) If an obstacle is detected in the current lane (not the other lane) and it is near to the vehicle, it should \"slow cruise\" cautiously until the vehicle is very close to the obstacle.\n    4) If an obstacle is detected on the current lane and it is very close to the vehicle (there is little to no road left between the vehicle and the obstacle), the vehicle should switch to the other lane by either \"change lane left\" or \"change lane right\", following this logic:\n    - If the vehicle is currently on the left lane, it should \"change lane right\".\n    - If the vehicle is currently on the right lane, it should \"change lane left\".\nResponse Format (Strict Adherence Required):\n[Scene analysis and Reasoning]\n- The vehicle is currently in the {left/right} lane.\n- Obstacles are {choose one from: \"not on the same lane\", \"far away\", \"near\", \"very close\"}.\n- Based on these conditions, the optimal movement decision is: {decision from: \"straight forward\", \"slow cruise\", \"change lane left\", \"change lane right\"}.\n[Final Decision]\n{decision}",
+            "images": [
+                "./test/images/image_20250227_183228_271659.png"
+            ]
+        },
+        {
+            "role": "Assistant",
+            "content": "[Scene analysis and Reasoning]\n- The vehicle is currently in the left lane.\n- Obstacles are not on the same lane.\n- Based on these conditions, the optimal movement decision is: change lane left.\n[Final Decision]\nchange lane left"
+        }
+    ]
+}

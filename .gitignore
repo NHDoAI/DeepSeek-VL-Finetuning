@@ -418,10 +418,18 @@ tags
 # Data folder
 data/
 
+# un-needed files
+training_code/notes.txt
+training_code/test_tensor.py
+training_v1_eval-batch.py
+training_script_versions.txt
+*.safetensors
+
 #un-needed folders
 random_scripts/
 images/
 labels/
+inferences_output/
 output/
 inference_code/test_objects_detection/
 wandb/
@@ -430,4 +438,12 @@ test_labels/
 images_backup/
 images_smallset/
 labels_smallset/
-saved_model*/
+#saved_model*/
+lidar/
+*wandb*/
+small_train/
+testing_train_loop/
+version_evaluation/
+*merged_model*/
+evaluation_stage/
+training_stage/
