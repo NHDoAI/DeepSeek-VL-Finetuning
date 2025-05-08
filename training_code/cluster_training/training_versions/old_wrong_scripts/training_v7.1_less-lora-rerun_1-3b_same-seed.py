@@ -216,6 +216,7 @@ def evaluate_model(model, eval_dataloader, device):
             labels = batch["input_ids"].clone()
             # For each sequence in the batch, mask out the first 1014 tokens
             labels[:, 0:1014] = -100
+            labels = labels.masked_fill(batch["attention_mask"] == 0, -100)
             batch["labels"] = labels
 
             # Forward pass through language model
@@ -581,6 +582,7 @@ for epoch in range(num_epochs): # epochs loop
         labels = batch["input_ids"].clone()
         # For each sequence in the batch, mask out the first 1014 tokens
         labels[:, 0:1014] = -100
+        labels = labels.masked_fill(batch["attention_mask"] == 0, -100)
         batch["labels"] = labels
     
         # if cluster_flag:

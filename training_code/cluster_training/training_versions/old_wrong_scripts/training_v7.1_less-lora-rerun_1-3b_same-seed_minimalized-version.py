@@ -19,88 +19,13 @@ import wandb
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-cluster_flag = True
+
 model_type = "1.3B"
 
 checkpoint_dir = "./1.3b_less-lora_rerun_v7_deterministic_seed/"
 
-# Number of training steps between evaluations
-eval_every_n_steps = 100  # Adjust this value as needed
 
 # ------ Define useful functions and classes ------
-
-# --- Function to log memory usage ---
-def log_memory(prefix=""):
-    device = torch.device("cuda:0")
-    properties = torch.cuda.get_device_properties(device)
-    total_memory = properties.total_memory / (1024**2)  # Total memory in bytes
-    reserved_memory = torch.cuda.memory_reserved(device) / (1024**2) # Reserved memory in bytes
-    allocated_memory = torch.cuda.memory_allocated(device) / (1024**2) # Allocated memory in bytes
-    #free_memory = reserved_memory - allocated_memory  # Free memory in reserved space
-    # allocated = torch.cuda.memory_allocated() / (1024**2)  # In MB
-    # reserved = torch.cuda.memory_reserved() / (1024**2)    # In MB
-    print(f"{prefix} GPU Memory - Total: {total_memory:.2f} MB | Allocated: {allocated_memory:.2f} MB | Reserved: {reserved_memory:.2f} MB") #| Free: {free_memory:.2f} MB
-
-def get_gpu_memory_info(gpu_id):
-    """
-    Uses nvidia-smi to query memory details for a specific GPU.
-    The `-i` option specifies the GPU index.
-    """
-    try:
-        # Query memory info for the specified GPU.
-        # The '--format=csv,noheader,nounits' flag provides a clean CSV without extra headers or units.
-        cmd = [
-            'nvidia-smi',
-            '-i', str(gpu_id),
-            '--query-gpu=memory.total,memory.used,memory.free',
-            '--format=csv,noheader,nounits'
-        ]
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True
-        )
-        # Expecting one line of CSV output for memory info, e.g., "11178, 230, 10948"
-        line = result.stdout.strip()
-        total, used, free = [item.strip() for item in line.split(',')]
-        return {
-            'Memory Total (MiB)': total,
-            'Memory Used (MiB)': used,
-            'Memory Free (MiB)': free
-        }
-    except subprocess.CalledProcessError as e:
-        print("Error executing nvidia-smi:", e.stderr)
-        return None
-    except Exception as e:
-        print("Unexpected error:", e)
-        return None
-
-# --- Function to split data files into training and evaluation sets, currently not used ---
-def split_data_files(data_dir, eval_ratio=0.1, seed=42):
-    """
-    Split the data files into training and evaluation sets.
-    
-    Args:
-        data_dir (str): Directory containing the JSON data files.
-        eval_ratio (float): Proportion of data to use for evaluation.
-        seed (int): Random seed for reproducibility.
-        
-    Returns:
-        tuple: Lists of file paths for training and evaluation.
-    """
-    random.seed(seed)
-    
-    data_files = [os.path.join(data_dir, fname) for fname in os.listdir(data_dir) if fname.endswith('.json')]
-    random.shuffle(data_files)
-    
-    split_idx = int(len(data_files) * (1 - eval_ratio))
-    train_files = data_files[:split_idx]
-    eval_files = data_files[split_idx:]
-    
-    print(f"Dataset split: {len(train_files)} training files, {len(eval_files)} evaluation files")
-    return train_files, eval_files
 
 # --- Custom dataset class for loading and processing data ---
 class MyMultimodalDataset(Dataset):
@@ -319,17 +244,6 @@ run = wandb.init(
 # --- Load environment variables ---
 load_dotenv(override=True)
 
-# --- Get the name of the GPU ---
-gpu_id = torch.cuda.current_device()
-device_name = torch.cuda.get_device_name(gpu_id)  # 0 is the device index
-
-if not cluster_flag:
-    print(f"CUDA Device Name: {device_name}")
-    gpu_memory = get_gpu_memory_info(gpu_id)
-    print(f"PyTorch is using GPU {gpu_id}:")
-    print(gpu_memory)
-else:
-    log_memory("Before original model load:")
 
 # --- Load model related objects ---
 
@@ -379,14 +293,6 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto"
 )
 
-# --- Log memory usage after loading the model ---
-# if not cluster_flag:
-#     print("After original model loading:")
-#     gpu_memory = get_gpu_memory_info(gpu_id)
-#     print(f"PyTorch is using GPU {gpu_id}:")
-#     print(gpu_memory)
-# else:
-#     log_memory("After original model loading:")
 
 
 # TODO: test Lora and how to apply to different layers, how to freeze some module
@@ -433,14 +339,7 @@ model = get_peft_model(model, lora_config, adapter_name="adapter")
 best_checkpoint_path = "saved_model_1.3b_less-lora_cluster_b6_re-run_v7_deterministic_seed/"
 checkpoint_path = checkpoint_dir+best_checkpoint_path
 
-# --- Log memory usage after LoRA model is created---
-# if cluster_flag:
-#     log_memory("After LoRA model loading:")
-# else:
-#     print("After LoRA model loading:")
-#     gpu_memory = get_gpu_memory_info(gpu_id)
-#     print(f"PyTorch is using GPU {gpu_id}:")
-#     print(gpu_memory)
+
 
 # --- Prepare Training Loop ---
 # TODO: check what are all the hyperparameters to be defined and group them into a config file
@@ -554,7 +453,6 @@ if early_stop_flag:
 avg_train_loss = 0.0
 eval_loss = 0.0
 test_loss = 0.0
-global_step = 0  # Track total steps across all epochs
 
 for epoch in range(num_epochs): # epochs loop
     total_train_loss = 0.0
@@ -562,13 +460,6 @@ for epoch in range(num_epochs): # epochs loop
     total_samples = 0
     
     for batch_idx, batch in enumerate(train_dataloader): # batches loop
-        # if cluster_flag:
-        #     log_memory("After LoRA model loading:")
-        # else:
-        #     print("After LoRA model loading:")
-        #     gpu_memory = get_gpu_memory_info(gpu_id)
-        #     print(f"PyTorch is using GPU {gpu_id}:")
-        #     print(gpu_memory)
 
         current_batch_size = batch["input_ids"].shape[0]
 
@@ -584,15 +475,9 @@ for epoch in range(num_epochs): # epochs loop
         labels = batch["input_ids"].clone()
         # For each sequence in the batch, mask out the first 1014 tokens
         labels[:, 0:1014] = -100
+        labels = labels.masked_fill(batch["attention_mask"] == 0, -100)
         batch["labels"] = labels
     
-        # if cluster_flag:
-        #     log_memory("After processing batch:")
-        # else:
-        #     print("After processing batch:")
-        #     gpu_memory = get_gpu_memory_info(gpu_id)
-        #     print(f"PyTorch is using GPU {gpu_id}:")
-        #     print(gpu_memory)
 
         #batch["labels"].to(model.device)
         
@@ -604,106 +489,61 @@ for epoch in range(num_epochs): # epochs loop
             attention_mask=batch['attention_mask'],
             labels= batch["labels"]  
         )
-        if cluster_flag:
-            log_memory("After forward pass:")   
-        else:
-            print("After forward pass:")
-            gpu_memory = get_gpu_memory_info(gpu_id)
-            print(f"PyTorch is using GPU {gpu_id}:")
-            print(gpu_memory)
 
         loss = outputs.loss
         loss.backward()
 
-        if cluster_flag:
-            log_memory("After loss backward:")
-        else:
-            print("After loss backward:")
-            gpu_memory = get_gpu_memory_info(gpu_id)
-            print(f"PyTorch is using GPU {gpu_id}:")
-            print(gpu_memory)
-
         optimizer.step()
         optimizer.zero_grad()
-
-        if cluster_flag:
-            log_memory("After parameters update:")
-        else:
-            print("After parameters update:")
-            gpu_memory = get_gpu_memory_info(gpu_id)
-            print(f"PyTorch is using GPU {gpu_id}:")
-            print(gpu_memory)
 
         total_train_loss += loss.item()*current_batch_size
         total_samples += current_batch_size
         num_batches += 1
-        global_step += 1
 
         # Log current batch loss
-        print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Step {global_step}, Loss: {loss.item():.4f}")
+        print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Loss: {loss.item():.4f}")
 
         wandb.log({
             "train_loss": loss.item(),
             "epoch": epoch + 1,
-            "step": global_step
+            "step": epoch * len(train_dataloader) + batch_idx + 1
         })
-        
-        # Evaluate model every eval_every_n_steps
-        if global_step % eval_every_n_steps == 0:
-            # Calculate average training loss for reporting
-            current_avg_train_loss = total_train_loss / total_samples if total_samples > 0 else 0
-            
-            # Run evaluation
-            eval_loss = evaluate_model(model, eval_dataloader, model.device)
-            print(f"Evaluation - Step {global_step}, Avg Train Loss: {current_avg_train_loss:.4f}, Eval Loss: {eval_loss:.4f}")
-            
-            # Run test evaluation
-            test_loss = evaluate_model(model, test_dataloader, model.device)
-            print(f"Test - Step {global_step}, Test Loss: {test_loss:.4f}")
-            
-            # Log evaluation metrics
-            wandb.log({
-                "eval_loss": eval_loss,
-                "test_loss": test_loss,
-                "step": global_step
-            })
-            
-            # Check early stopping
-            if early_stop_flag:
-                if early_stopper.check(eval_loss):
-                    early_stopper.save_checkpoint(model=model, epoch=epoch+1)
-                    # Additional metadata for step-based checkpoint
-                    with open(os.path.join(checkpoint_path, "checkpoint_metadata.json"), "r") as f:
-                        metadata = json.load(f)
-                    
-                    metadata["step"] = global_step
-                    
-                    with open(os.path.join(checkpoint_path, "checkpoint_metadata.json"), "w") as f:
-                        json.dump(metadata, f, indent=4)
-                else:
-                    if early_stopper.early_stop:
-                        print("Eval stagnation exceeded patience, early stopping activated")
-                        break
-        
         del inputs_embeds
         del batch
         del outputs
         del loss
         torch.cuda.empty_cache()
 
-    # If early stopping was triggered, break out of the epoch loop too
-    if early_stop_flag and early_stopper.early_stop:
-        break
 
     epoch_time = time.time() - start_time
     print(f"Epoch {epoch+1}/{num_epochs} completed - Time: {epoch_time:.2f} seconds")
    
+
     wandb.log({
         "epoch_time": epoch_time,
-        "epoch": epoch + 1
-    })
+        })
     
-    # Save first epoch checkpoint
+    avg_train_loss = total_train_loss / total_samples if total_samples > 0 else 0 # avg epoch loss
+
+    # --- Evaluate model on eval set ---
+    eval_loss = evaluate_model(model, eval_dataloader, model.device)
+    print(f"Evaluation - Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Eval Loss: {eval_loss:.4f}")
+
+    wandb.log({ 
+    "eval_loss": eval_loss,
+    "epoch": epoch + 1,
+    "step": epoch * len(train_dataloader) + batch_idx + 1
+        })
+
+    # --- Evaluate model on test set ---
+    test_loss = evaluate_model(model, test_dataloader, model.device)
+    print(f"Test - Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Test Loss: {test_loss:.4f}")
+
+    wandb.log({ 
+    "test_loss": test_loss,
+    "epoch": epoch + 1,
+    "step": epoch * len(train_dataloader) + batch_idx + 1
+        })
     if epoch == 0:
         first_epoch_chkpoint = checkpoint_dir+"first_epoch_chkpoint/"
         model.save_pretrained(first_epoch_chkpoint)
@@ -711,7 +551,6 @@ for epoch in range(num_epochs): # epochs loop
         # Add metadata about this checkpoint
         metadata = {
             "epoch": epoch+1,
-            "step": global_step,
             "train_loss": total_train_loss / total_samples,
             "eval_loss": eval_loss,
             "test_loss": test_loss,
@@ -721,6 +560,14 @@ for epoch in range(num_epochs): # epochs loop
         with open(os.path.join(first_epoch_chkpoint, "checkpoint_metadata.json"), "w") as f:
             json.dump(metadata, f, indent=4)
         wandb.log({"first_epoch_checkpoint_saved": True})
+
+    if early_stop_flag:
+        if early_stopper.check(eval_loss):
+            early_stopper.save_checkpoint(model=model, epoch=epoch+1)
+        else:
+            if early_stopper.early_stop:
+                print("eval stagnation exceeded patience, early stopping activated")
+                break
 
 # --- Log artifacts to wandb ---
 run.log_artifact(dataset_artifact)
