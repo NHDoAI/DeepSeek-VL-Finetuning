@@ -432,7 +432,6 @@ labels/
 inferences_output/
 output/
 inference_code/test_objects_detection/
-wandb/
 test_images/
 test_labels/
 images_backup/
