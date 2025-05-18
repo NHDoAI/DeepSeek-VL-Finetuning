@@ -6,6 +6,7 @@ import time
 import subprocess
 
 import torch
+import torch.nn.functional as F 
 from torch.utils.data import DataLoader, Dataset
 import bitsandbytes as bnb
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoConfig
@@ -23,6 +24,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 cluster_flag = True
 model_type = "1.3B"
 
+#to be modified
 checkpoint_dir = "./1.3b_less-lora_rerun_v7_deterministic_seed/"
 
 # Number of training steps between evaluations
@@ -31,16 +33,6 @@ eval_every_n_steps = 100  # Adjust this value as needed
 # ------ Define useful functions and classes ------
 
 # --- Function to log memory usage ---
-def log_memory(prefix=""):
-    device = torch.device("cuda:0")
-    properties = torch.cuda.get_device_properties(device)
-    total_memory = properties.total_memory / (1024**2)  # Total memory in bytes
-    reserved_memory = torch.cuda.memory_reserved(device) / (1024**2) # Reserved memory in bytes
-    allocated_memory = torch.cuda.memory_allocated(device) / (1024**2) # Allocated memory in bytes
-    #free_memory = reserved_memory - allocated_memory  # Free memory in reserved space
-    # allocated = torch.cuda.memory_allocated() / (1024**2)  # In MB
-    # reserved = torch.cuda.memory_reserved() / (1024**2)    # In MB
-    print(f"{prefix} GPU Memory - Total: {total_memory:.2f} MB | Allocated: {allocated_memory:.2f} MB | Reserved: {reserved_memory:.2f} MB") #| Free: {free_memory:.2f} MB
 
 def get_gpu_memory_info(gpu_id):
     """
@@ -77,6 +69,26 @@ def get_gpu_memory_info(gpu_id):
     except Exception as e:
         print("Unexpected error:", e)
         return None
+
+def log_memory_cluster(prefix=""):
+    device = torch.device("cuda:0")
+    properties = torch.cuda.get_device_properties(device)
+    total_memory = properties.total_memory / (1024**2)  # Total memory in bytes
+    reserved_memory = torch.cuda.memory_reserved(device) / (1024**2) # Reserved memory in bytes
+    allocated_memory = torch.cuda.memory_allocated(device) / (1024**2) # Allocated memory in bytes
+    #free_memory = reserved_memory - allocated_memory  # Free memory in reserved space
+    # allocated = torch.cuda.memory_allocated() / (1024**2)  # In MB
+    # reserved = torch.cuda.memory_reserved() / (1024**2)    # In MB
+    print(f"{prefix} GPU Memory - Total: {total_memory:.2f} MB | Allocated: {allocated_memory:.2f} MB | Reserved: {reserved_memory:.2f} MB") #| Free: {free_memory:.2f} MB
+
+def log_memory_flex(cluster_flag=False, message="GPU Memory:", gpu_id=0, device_name="GPU"):
+    if not cluster_flag:
+        print(f"CUDA Device Name: {device_name}")
+        gpu_memory = get_gpu_memory_info(gpu_id)
+        print(f"PyTorch is using GPU {gpu_id}:")
+        print(gpu_memory)
+    else:
+        log_memory_cluster(message)
 
 # --- Function to split data files into training and evaluation sets, currently not used ---
 def split_data_files(data_dir, eval_ratio=0.1, seed=42):
@@ -190,8 +202,57 @@ def custom_collate_fn(batch, pad_keys=None, pad_values=None, tokenizer=None):
             padded_batch[key] = [sample[key] for sample in batch]
     return padded_batch
 
+def custom_forward(batch, model):
+    current_batch_size = batch["input_ids"].shape[0]
+    batch = {k: v.to(model.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+    if 'pixel_values' in batch:
+        batch['pixel_values'] = batch['pixel_values'].to(torch.float16)
+    inputs_embeds = model.prepare_inputs_embeds(**batch)
+
+    del batch["pixel_values"]
+    labels = batch["input_ids"].clone()
+    # For each sequence in the batch, mask out the first 1014 tokens
+    labels[:, 0:1014] = -100
+    labels = labels.masked_fill(batch["attention_mask"] == 0, -100)
+    #batch["labels"] = labels
+
+    # Forward pass through language model
+    outputs = model.language_model(
+        inputs_embeds=inputs_embeds,
+        attention_mask=batch['attention_mask'],
+        use_cache=False,
+        #labels= batch["labels"]  
+    )
+    return outputs, current_batch_size, labels, inputs_embeds
+
+def weighted_loss_calculation(logits, labels, sentinel_ids, keyword_weight, background_weight):
+
+    weights = torch.full_like(labels, background_weight, dtype=torch.float32)  
+    for token, token_id in sentinel_ids.items():                              
+        idxs = (labels == token_id).nonzero(as_tuple=False)                 
+        for batch_idx, sentinel_idx in idxs:                                              
+            if sentinel_idx + 1 < labels.size(1):                                 
+                weights[batch_idx, sentinel_idx + 1] = keyword_weight                     
+
+    # shift for causal LM                                              
+    shift_logits  = logits[:, :-1, :].contiguous()                     
+    shift_labels  = labels[:, 1:].contiguous()                         
+    shift_weights = weights[:, 1:].contiguous()                        
+    valid_mask    = (shift_labels != -100)                             
+    loss_per_tok  = F.cross_entropy(                                   
+        shift_logits.view(-1, shift_logits.size(-1)),                  
+        shift_labels.view(-1),                                         
+        reduction='none',                                              
+        ignore_index=-100                                              
+    ).view_as(shift_labels)                                            
+    numerator   = (loss_per_tok * shift_weights * valid_mask).sum()    
+    denominator = (shift_weights * valid_mask).sum() + 1e-10
+    loss = numerator / denominator  
+
+    return loss
+
 # --- Function to evaluate the model's performance ---
-def evaluate_model(model, eval_dataloader, device):
+def evaluate_model(model, data_dataloader, device):
     """
     Evaluate the model on the evaluation dataset.
     
@@ -208,29 +269,12 @@ def evaluate_model(model, eval_dataloader, device):
     total_samples = 0
     
     with torch.no_grad():
-        for batch in eval_dataloader:
-            current_batch_size = batch["input_ids"].shape[0]
-            batch = {k: v.to(model.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-            if 'pixel_values' in batch:
-                batch['pixel_values'] = batch['pixel_values'].to(torch.float16)
-            inputs_embeds = model.prepare_inputs_embeds(**batch)
-        
-            del batch["pixel_values"]
-            labels = batch["input_ids"].clone()
-            # For each sequence in the batch, mask out the first 1014 tokens
-            labels[:, 0:1014] = -100
-            labels = labels.masked_fill(batch["attention_mask"] == 0, -100)
-            batch["labels"] = labels
+        for batch_idx, batch in enumerate(data_dataloader):
+            outputs, current_batch_size, labels, inputs_embeds = custom_forward(batch, model)
+            logits  = outputs.logits 
+            loss = weighted_loss_calculation(logits, labels, sentinel_ids, keyword_weight, background_weight)
 
-            # Forward pass through language model
-            outputs = model.language_model(
-                inputs_embeds=inputs_embeds,
-                attention_mask=batch['attention_mask'],
-                labels= batch["labels"]  
-            )
-            
-            loss = outputs.loss
-            total_loss += loss.item()*current_batch_size
+            total_loss += loss.item()*current_batch_size # to deal with batches that have different sizes (for example the last batch might not have enough samples to fill the batch)
             total_samples += current_batch_size
             del inputs_embeds
             del batch
@@ -315,7 +359,7 @@ def worker_init_fn(worker_id):
 
 # --- Initialize wandb ---
 run = wandb.init(
-    project="deepseek-vl-training",  # name of your project in wandb
+    project="deepseek-vl-training_final",  # name of your project in wandb
     name="1.3b_less-lora_cluster_b6_re-run_v7_deterministic_seed",            # optional: custom run name
 )
 
@@ -325,14 +369,9 @@ load_dotenv(override=True)
 # --- Get the name of the GPU ---
 gpu_id = torch.cuda.current_device()
 device_name = torch.cuda.get_device_name(gpu_id)  # 0 is the device index
+print(f"PyTorch is using GPU {gpu_id}: {device_name}")
 
-if not cluster_flag:
-    print(f"CUDA Device Name: {device_name}")
-    gpu_memory = get_gpu_memory_info(gpu_id)
-    print(f"PyTorch is using GPU {gpu_id}:")
-    print(gpu_memory)
-else:
-    log_memory("Before original model load:")
+log_memory_flex(cluster_flag, message="Before original model load:",gpu_id=gpu_id, device_name=device_name)
 
 # --- Load model related objects ---
 
@@ -345,7 +384,6 @@ elif model_type == "1.3B":
 # --- Load chat processor and tokenizer from model path ---
 vl_chat_processor = VLChatProcessor.from_pretrained(model_path)
 tokenizer = vl_chat_processor.tokenizer
-
 
 # --- Define the Quantization Configuration ---
 
@@ -382,6 +420,19 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto"
 )
 
+new_tokens = ["<LANE>", "<OBS>", "<DEC>"]  
+
+tokenizer.add_special_tokens(                                       
+    {"additional_special_tokens": new_tokens}                       
+)       
+
+sentinel_ids = {tok: tokenizer.convert_tokens_to_ids(tok)           
+                for tok in new_tokens}                              
+keyword_weight     = 1.5                                            
+background_weight  = 1.0                                            
+# you must resize *before* loading LoRA (adds new rows to the LM)    
+model.resize_token_embeddings(len(tokenizer))    
+
 # --- Log memory usage after loading the model ---
 # if not cluster_flag:
 #     print("After original model loading:")
@@ -389,7 +440,7 @@ model = AutoModelForCausalLM.from_pretrained(
 #     print(f"PyTorch is using GPU {gpu_id}:")
 #     print(gpu_memory)
 # else:
-#     log_memory("After original model loading:")
+#     log_memory_cluster("After original model loading:")
 
 
 # TODO: test Lora and how to apply to different layers, how to freeze some module
@@ -404,18 +455,19 @@ if model_type == "1.3B":
     lora_config = LoraConfig(
         r=lora_rank,
         lora_alpha=lora_alpha,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "lm_head",
                         "gate_proj", "up_proj", "down_proj",
                         "attn.qkv", "attn.proj", "fc1", "fc2","patch_embed.proj", "attn_pool.q", "attn_pool.kv",
                         #"aligner.layers.0", "aligner.layers.2"
                         ],
         lora_dropout=lora_dropout,
         bias="none",
-        task_type="CAUSAL_LM"
+        task_type="CAUSAL_LM",
+        modules_to_save=["embed_tokens"]
     )
 elif model_type == "7B":
     # --- 7b model ---
-    lora_config = LoraConfig(
+    lora_config = LoraConfig( #to be modified
         r=lora_rank,
         lora_alpha=lora_alpha,
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", #language model
@@ -432,13 +484,13 @@ elif model_type == "7B":
 model = get_peft_model(model, lora_config, adapter_name="adapter")
 
 # --- Define checkpoint path for saving the model-checkpoints ---
-
+#to be modified
 best_checkpoint_path = "saved_model_1.3b_less-lora_cluster_b6_re-run_v7_deterministic_seed/"
 checkpoint_path = checkpoint_dir+best_checkpoint_path
 
 # --- Log memory usage after LoRA model is created---
 # if cluster_flag:
-#     log_memory("After LoRA model loading:")
+#     log_memory_cluster("After LoRA model loading:")
 # else:
 #     print("After LoRA model loading:")
 #     gpu_memory = get_gpu_memory_info(gpu_id)
@@ -515,8 +567,9 @@ dataset_artifact.add_dir("./eval/labels")
 dataset_artifact.add_dir("./test/images")
 dataset_artifact.add_dir("./test/labels")
 
+script_name = os.path.basename(__file__)
 code_artifact = wandb.Artifact(name="training_code", type="code")
-code_artifact.add_file("training_v7.1_less-lora-rerun_1-3b_same-seed.py")
+code_artifact.add_file(script_name)
 
 # --- Define number of epochs ---
 num_epochs = 25
@@ -586,73 +639,27 @@ for epoch in range(num_epochs): # epochs loop
     total_samples = 0
     
     for batch_idx, batch in enumerate(train_dataloader): # batches loop
+
+        outputs, current_batch_size, labels, inputs_embeds = custom_forward(batch, model)
+        logits  = outputs.logits 
+        loss = weighted_loss_calculation(logits, labels, sentinel_ids, keyword_weight, background_weight)
+                            
+        #scaled_loss = loss / accum_steps                                   
+        loss.backward()                                             
+
         # if cluster_flag:
-        #     log_memory("After LoRA model loading:")
+        #     log_memory_cluster("After loss backward:")
         # else:
-        #     print("After LoRA model loading:")
+        #     print("After loss backward:")
         #     gpu_memory = get_gpu_memory_info(gpu_id)
         #     print(f"PyTorch is using GPU {gpu_id}:")
         #     print(gpu_memory)
-
-        current_batch_size = batch["input_ids"].shape[0]
-
-        batch = {k: v.to(model.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-
-        if 'pixel_values' in batch:
-            batch['pixel_values'] = batch['pixel_values'].to(torch.float16)
-
-        # Prepare input embeddings using the model's method
-        inputs_embeds = model.prepare_inputs_embeds(**batch)
-        del batch["pixel_values"]
-
-        labels = batch["input_ids"].clone()
-        # For each sequence in the batch, mask out the first 1014 tokens
-        labels[:, 0:1014] = -100
-        labels = labels.masked_fill(batch["attention_mask"] == 0, -100)
-        batch["labels"] = labels
-    
-        # if cluster_flag:
-        #     log_memory("After processing batch:")
-        # else:
-        #     print("After processing batch:")
-        #     gpu_memory = get_gpu_memory_info(gpu_id)
-        #     print(f"PyTorch is using GPU {gpu_id}:")
-        #     print(gpu_memory)
-
-        #batch["labels"].to(model.device)
-        
-        # Convert pixel_values to float16 as in your inference code
-
-        # Forward pass through language model
-        outputs = model.language_model(
-            inputs_embeds=inputs_embeds,
-            attention_mask=batch['attention_mask'],
-            labels= batch["labels"]  
-        )
-        if cluster_flag:
-            log_memory("After forward pass:")   
-        else:
-            print("After forward pass:")
-            gpu_memory = get_gpu_memory_info(gpu_id)
-            print(f"PyTorch is using GPU {gpu_id}:")
-            print(gpu_memory)
-
-        loss = outputs.loss
-        loss.backward()
-
-        if cluster_flag:
-            log_memory("After loss backward:")
-        else:
-            print("After loss backward:")
-            gpu_memory = get_gpu_memory_info(gpu_id)
-            print(f"PyTorch is using GPU {gpu_id}:")
-            print(gpu_memory)
 
         optimizer.step()
         optimizer.zero_grad()
 
         if cluster_flag:
-            log_memory("After parameters update:")
+            log_memory_cluster("After parameters update:")
         else:
             print("After parameters update:")
             gpu_memory = get_gpu_memory_info(gpu_id)
@@ -701,18 +708,7 @@ for epoch in range(num_epochs): # epochs loop
             
             # --- Learning Rate Scheduler and Early Stopping Logic ---
             if early_stop_flag:
-                # Step the scheduler with the evaluation loss
-                scheduler.step(eval_loss)
-
-                # Check if LR was reduced
-                new_lr = optimizer.param_groups[0]['lr']
-                # Get current_lr before scheduler.step for comparison
-                # We need to fetch it before scheduler.step or store the previous value
-                # For simplicity, we'll assume wandb.log for current_lr handles the "before" state
-                # or we can fetch it directly if not logged before scheduler step.
-                # Let's assume the 'current_lr' logged above is the one before potential reduction.
-                
-                # To be precise, let's get the LR before stepping the scheduler for comparison
+                # First fetching the old/current learning rate so that we can compare it to new learning to see it new LR was reduced
                 old_lr = optimizer.param_groups[0]['lr'] # Get LR before potential reduction by scheduler
                 scheduler.step(eval_loss) # Step the scheduler
                 new_lr = optimizer.param_groups[0]['lr'] # Get LR after potential reduction

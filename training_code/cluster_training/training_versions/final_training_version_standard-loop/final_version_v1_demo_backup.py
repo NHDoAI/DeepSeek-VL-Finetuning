@@ -325,6 +325,7 @@ load_dotenv(override=True)
 # --- Get the name of the GPU ---
 gpu_id = torch.cuda.current_device()
 device_name = torch.cuda.get_device_name(gpu_id)  # 0 is the device index
+print(f"PyTorch is using GPU {gpu_id}: {device_name}")
 
 if not cluster_flag:
     print(f"CUDA Device Name: {device_name}")
