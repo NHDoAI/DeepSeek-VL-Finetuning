@@ -25,10 +25,50 @@ cluster_flag = True
 model_type = "1.3B"
 
 #to be modified
-checkpoint_dir = "./1.3b_less-lora_rerun_v7_deterministic_seed/"
+#checkpoint_dir = "./1.3b_less-lora_rerun_v7_deterministic_seed/"
+
+# ------ Configuration & Hyperparameters ------
+hyperparameters = {
+
+    "base_checkpoint_dir": "./", # Base directory for checkpoints
+    "run_name_prefix": "1.3b_less-lora_rerun_v7_deterministic_seed", # Prefix for run names and checkpoint subdirs
+    "eval_every_n_steps": 100,
+    "master_seed": 42,
+    "num_workers_dataloader": 4,
+    "lora_rank": 6,
+    "lora_alpha": 12,
+    "lora_dropout": 0.15,
+    "batch_size": 6,
+    "num_epochs": 25,
+    "lr_scheduler_patience": 1,
+    "lr_scheduler_factor": 0.5,
+    "min_lr": 1e-6,
+    "max_lr_reductions": 3,
+    "learning_rate": 2e-4,
+    "early_stop_flag": True,
+    "early_stopping_patience": 3,
+    "early_stopping_delta": 0.0001,
+    "keyword_weight": 1.5,
+    "background_weight": 1.0,
+    "wandb_project_name": "deepseek-vl-training_final",
+    "wandb_run_name": "1.3b_less-lora_rerun_v7_deterministic_seed",
+    "real_image_eval_weight": 1.0,
+    "sim_image_eval_weight": 0.5,
+    # Derived checkpoint paths - these will be constructed using other hyperparameters
+    # "checkpoint_dir": constructed below
+    # "best_checkpoint_path_suffix": constructed below
+}
+
+# Construct checkpoint_dir and best_checkpoint_path using other hyperparameters
+hyperparameters["checkpoint_dir"] = os.path.join(
+    hyperparameters["base_checkpoint_dir"],
+    f"{hyperparameters['run_name_prefix']}/"
+)
+hyperparameters["best_checkpoint_path_suffix"] = f"best_chkpoint_{hyperparameters['run_name_prefix']}/"
+
 
 # Number of training steps between evaluations
-eval_every_n_steps = 100  # Adjust this value as needed
+eval_every_n_steps = hyperparameters["eval_every_n_steps"] # Adjust this value as needed
 
 # ------ Define useful functions and classes ------
 
@@ -272,7 +312,7 @@ def evaluate_model(model, data_dataloader, device):
         for batch_idx, batch in enumerate(data_dataloader):
             outputs, current_batch_size, labels, inputs_embeds = custom_forward(batch, model)
             logits  = outputs.logits 
-            loss = weighted_loss_calculation(logits, labels, sentinel_ids, keyword_weight, background_weight)
+            loss = weighted_loss_calculation(logits, labels, sentinel_ids, hyperparameters["keyword_weight"], hyperparameters["background_weight"])
 
             total_loss += loss.item()*current_batch_size # to deal with batches that have different sizes (for example the last batch might not have enough samples to fill the batch)
             total_samples += current_batch_size
@@ -333,7 +373,7 @@ class EarlyStopping:
         
 
 # 1) pick ONE master seed for the whole run
-MASTER_SEED = 42          # change this between experiments
+MASTER_SEED = hyperparameters["master_seed"]          # change this between experiments
 
 # 2) seed every library that owns an RNG
 def seed_everything(seed: int):
@@ -359,8 +399,8 @@ def worker_init_fn(worker_id):
 
 # --- Initialize wandb ---
 run = wandb.init(
-    project="deepseek-vl-training_final",  # name of your project in wandb
-    name="1.3b_less-lora_cluster_b6_re-run_v7_deterministic_seed",            # optional: custom run name
+    project=hyperparameters["wandb_project_name"],  # name of your project in wandb
+    name=hyperparameters["wandb_run_name"], # Constructing a more dynamic run name
 )
 
 # --- Load environment variables ---
@@ -428,27 +468,16 @@ tokenizer.add_special_tokens(
 
 sentinel_ids = {tok: tokenizer.convert_tokens_to_ids(tok)           
                 for tok in new_tokens}                              
-keyword_weight     = 1.5                                            
-background_weight  = 1.0                                            
+keyword_weight     = hyperparameters["keyword_weight"]                                            
+background_weight  = hyperparameters["background_weight"]                                            
 # you must resize *before* loading LoRA (adds new rows to the LM)    
 model.resize_token_embeddings(len(tokenizer))    
 
-# --- Log memory usage after loading the model ---
-# if not cluster_flag:
-#     print("After original model loading:")
-#     gpu_memory = get_gpu_memory_info(gpu_id)
-#     print(f"PyTorch is using GPU {gpu_id}:")
-#     print(gpu_memory)
-# else:
-#     log_memory_cluster("After original model loading:")
-
-
-# TODO: test Lora and how to apply to different layers, how to freeze some module
 # --- Apply LoRA Adapters to the Modules via configs ---
 
-lora_rank = 6
-lora_alpha = 12
-lora_dropout = 0.15
+lora_rank = hyperparameters["lora_rank"]
+lora_alpha = hyperparameters["lora_alpha"]
+lora_dropout = hyperparameters["lora_dropout"]
 
 if model_type == "1.3B":
     # --- 1.3b model ---
@@ -484,37 +513,43 @@ elif model_type == "7B":
 model = get_peft_model(model, lora_config, adapter_name="adapter")
 
 # --- Define checkpoint path for saving the model-checkpoints ---
-#to be modified
-best_checkpoint_path = "saved_model_1.3b_less-lora_cluster_b6_re-run_v7_deterministic_seed/"
-checkpoint_path = checkpoint_dir+best_checkpoint_path
-
-# --- Log memory usage after LoRA model is created---
-# if cluster_flag:
-#     log_memory_cluster("After LoRA model loading:")
-# else:
-#     print("After LoRA model loading:")
-#     gpu_memory = get_gpu_memory_info(gpu_id)
-#     print(f"PyTorch is using GPU {gpu_id}:")
-#     print(gpu_memory)
+best_checkpoint_path = hyperparameters["best_checkpoint_path_suffix"] # Using the suffix from hyperparameters
+checkpoint_path = os.path.join(hyperparameters["checkpoint_dir"], best_checkpoint_path)
 
 # --- Prepare Training Loop ---
-# TODO: check what are all the hyperparameters to be defined and group them into a config file
 
 # --- Prepare Datasets ---
 
 train_labels_dir = os.getenv('TRAIN_LABELS_PATH')
 print(train_labels_dir)
-eval_labels_dir = os.getenv('EVAL_LABELS_PATH')
-print(eval_labels_dir)
-test_labels_dir = os.getenv('TEST_LABELS_PATH') #to be changed for cluster path
-print(test_labels_dir)
+# eval_labels_dir = os.getenv('EVAL_LABELS_PATH') # Old
+# print(eval_labels_dir)
+# test_labels_dir = os.getenv('TEST_LABELS_PATH') # Old
+# print(test_labels_dir)
+
+eval_labels_dir_real = os.getenv('EVAL_LABELS_PATH_REAL')
+print(f"Eval Real Labels Path: {eval_labels_dir_real}")
+eval_labels_dir_sim = os.getenv('EVAL_LABELS_PATH_SIM')
+print(f"Eval Sim Labels Path: {eval_labels_dir_sim}")
+
+test_labels_dir_real = os.getenv('TEST_LABELS_PATH_REAL')
+print(f"Test Real Labels Path: {test_labels_dir_real}")
+test_labels_dir_sim = os.getenv('TEST_LABELS_PATH_SIM')
+print(f"Test Sim Labels Path: {test_labels_dir_sim}")
+
 
 # Split data into train and eval sets
 #train_files, eval_files = split_data_files(labels_dir, eval_ratio=0.2)
 
 train_files = [os.path.join(train_labels_dir, fname) for fname in os.listdir(train_labels_dir) if fname.endswith('.json')]
-eval_files = [os.path.join(eval_labels_dir, fname) for fname in os.listdir(eval_labels_dir) if fname.endswith('.json')]
-test_files = [os.path.join(test_labels_dir, fname) for fname in os.listdir(test_labels_dir) if fname.endswith('.json')]
+# eval_files = [os.path.join(eval_labels_dir, fname) for fname in os.listdir(eval_labels_dir) if fname.endswith('.json')] # Old
+# test_files = [os.path.join(test_labels_dir, fname) for fname in os.listdir(test_labels_dir) if fname.endswith('.json')] # Old
+
+eval_files_real = [os.path.join(eval_labels_dir_real, fname) for fname in os.listdir(eval_labels_dir_real) if fname.endswith('.json')]
+eval_files_sim = [os.path.join(eval_labels_dir_sim, fname) for fname in os.listdir(eval_labels_dir_sim) if fname.endswith('.json')]
+
+test_files_real = [os.path.join(test_labels_dir_real, fname) for fname in os.listdir(test_labels_dir_real) if fname.endswith('.json')]
+test_files_sim = [os.path.join(test_labels_dir_sim, fname) for fname in os.listdir(test_labels_dir_sim) if fname.endswith('.json')]
 
 # Create train and eval datasets
 train_dataset = MyMultimodalDataset(data_files=train_files, chat_processor=vl_chat_processor)
@@ -522,19 +557,25 @@ train_sampler  = torch.utils.data.RandomSampler(train_dataset,
                                                generator=g,
                                                replacement=False)
 
-eval_dataset = MyMultimodalDataset(data_files=eval_files, chat_processor=vl_chat_processor)
-test_dataset = MyMultimodalDataset(data_files=test_files, chat_processor=vl_chat_processor)
+# eval_dataset = MyMultimodalDataset(data_files=eval_files, chat_processor=vl_chat_processor) # Old
+# test_dataset = MyMultimodalDataset(data_files=test_files, chat_processor=vl_chat_processor) # Old
+
+eval_dataset_real = MyMultimodalDataset(data_files=eval_files_real, chat_processor=vl_chat_processor)
+eval_dataset_sim = MyMultimodalDataset(data_files=eval_files_sim, chat_processor=vl_chat_processor)
+
+test_dataset_real = MyMultimodalDataset(data_files=test_files_real, chat_processor=vl_chat_processor)
+test_dataset_sim = MyMultimodalDataset(data_files=test_files_sim, chat_processor=vl_chat_processor)
 
 # --- Define hyperparameters ---
 
-batch_size = 6
+batch_size = hyperparameters["batch_size"]
 
 # Before the loop - only create dataloader references but not the actual dataset yet
 train_dataloader = torch.utils.data.DataLoader(
     train_dataset,
     batch_size=batch_size,
     sampler=train_sampler,
-    num_workers=4,
+    num_workers=hyperparameters["num_workers_dataloader"],
     worker_init_fn=worker_init_fn,
     generator=g,            # << this is what makes shuffling deterministic
     collate_fn=lambda batch: custom_collate_fn(
@@ -545,16 +586,42 @@ train_dataloader = torch.utils.data.DataLoader(
     persistent_workers=True,
 )
 
-eval_dataloader = DataLoader(
-    eval_dataset, 
+# eval_dataloader = DataLoader( # Old
+#     eval_dataset, 
+#     batch_size=batch_size,
+#     shuffle=False, 
+#     collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
+# )
+# test_dataloader = DataLoader( # Old
+#     test_dataset, 
+#     batch_size=batch_size, 
+#     shuffle=False, 
+#     collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
+# )
+
+eval_dataloader_real = DataLoader(
+    eval_dataset_real,
     batch_size=batch_size,
-    shuffle=False, 
+    shuffle=False,
     collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
 )
-test_dataloader = DataLoader(
-    test_dataset, 
-    batch_size=batch_size, 
-    shuffle=False, 
+eval_dataloader_sim = DataLoader(
+    eval_dataset_sim,
+    batch_size=batch_size,
+    shuffle=False,
+    collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
+)
+
+test_dataloader_real = DataLoader(
+    test_dataset_real,
+    batch_size=batch_size,
+    shuffle=False,
+    collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
+)
+test_dataloader_sim = DataLoader(
+    test_dataset_sim,
+    batch_size=batch_size,
+    shuffle=False,
     collate_fn=lambda batch: custom_collate_fn(batch, pad_keys=["input_ids", "attention_mask", "images_seq_mask"], tokenizer=tokenizer)
 )
 
@@ -562,26 +629,35 @@ test_dataloader = DataLoader(
 dataset_artifact = wandb.Artifact(name="test_data_artifact", type="dataset")
 dataset_artifact.add_dir("./train/images")
 dataset_artifact.add_dir("./train/labels")
-dataset_artifact.add_dir("./eval/images")
-dataset_artifact.add_dir("./eval/labels")
-dataset_artifact.add_dir("./test/images")
-dataset_artifact.add_dir("./test/labels")
+# dataset_artifact.add_dir("./eval/images") # Old
+# dataset_artifact.add_dir("./eval/labels") # Old
+# dataset_artifact.add_dir("./test/images") # Old
+# dataset_artifact.add_dir("./test/labels") # Old
+# Assuming corresponding image directories exist
+dataset_artifact.add_dir("./eval/real/images")
+dataset_artifact.add_dir("./eval/real/labels")
+dataset_artifact.add_dir("./eval/simulation/images")
+dataset_artifact.add_dir("./eval/simulation/labels")
+dataset_artifact.add_dir("./test/real/images")
+dataset_artifact.add_dir("./test/real/labels")
+dataset_artifact.add_dir("./test/simulation/images")
+dataset_artifact.add_dir("./test/simulation/labels")
 
 script_name = os.path.basename(__file__)
 code_artifact = wandb.Artifact(name="training_code", type="code")
 code_artifact.add_file(script_name)
 
 # --- Define number of epochs ---
-num_epochs = 25
+num_epochs = hyperparameters["num_epochs"]
 
 # --- Scheduler Hyperparameters ---
-lr_scheduler_patience = 1
-lr_scheduler_factor = 0.5
-min_lr = 1e-6
-max_lr_reductions = 3
+lr_scheduler_patience = hyperparameters["lr_scheduler_patience"]
+lr_scheduler_factor = hyperparameters["lr_scheduler_factor"]
+min_lr = hyperparameters["min_lr"]
+max_lr_reductions = hyperparameters["max_lr_reductions"]
 
 #optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4) # torch optimizer
-lr_rate = 2e-4
+lr_rate = hyperparameters["learning_rate"]
 optimizer = bnb.optim.AdamW(model.parameters(), lr=lr_rate) # paged optimizer
 
 # --- Initialize Learning Rate Scheduler ---
@@ -597,19 +673,25 @@ scheduler = ReduceLROnPlateau(
 wandb.config.update(
     {
         # optional: hyperparameter logging
-        "run_name": run.name,
-        "batch_size": batch_size,
-        "num_epochs": num_epochs,
-        "learning_rate": lr_rate,
+        "run_name": run.name, # Already dynamic based on hyperparams
+        "batch_size": hyperparameters["batch_size"],
+        "num_epochs": hyperparameters["num_epochs"],
+        "learning_rate": hyperparameters["learning_rate"],
         "optimizer": "AdamW (bnb)",
-        "quantization": "4-bit",
-        "lora_r": lora_rank,
-        "lora_alpha": lora_alpha,
-        "lora_dropout": lora_dropout,
-        "lr_scheduler_patience": lr_scheduler_patience,
-        "lr_scheduler_factor": lr_scheduler_factor,
-        "min_lr": min_lr,
-        "max_lr_reductions": max_lr_reductions
+        "quantization": "4-bit", # This could also be a hyperparameter if you switch often
+        "lora_r": hyperparameters["lora_rank"],
+        "lora_alpha": hyperparameters["lora_alpha"],
+        "lora_dropout": hyperparameters["lora_dropout"],
+        "lr_scheduler_patience": hyperparameters["lr_scheduler_patience"],
+        "lr_scheduler_factor": hyperparameters["lr_scheduler_factor"],
+        "min_lr": hyperparameters["min_lr"],
+        "max_lr_reductions": hyperparameters["max_lr_reductions"],
+        "master_seed": hyperparameters["master_seed"],
+        "keyword_weight": hyperparameters["keyword_weight"],
+        "background_weight": hyperparameters["background_weight"],
+        "early_stopping_patience": hyperparameters["early_stopping_patience"],
+        "early_stopping_delta": hyperparameters["early_stopping_delta"],
+        "eval_every_n_steps": hyperparameters["eval_every_n_steps"],
     }
     )
 
@@ -619,17 +701,24 @@ start_time = time.time()
 model.train()
 
 # --- Enable/Disable early stopping ---
-early_stop_flag = True #TODO:modify to use argparse later
-
+early_stop_flag = hyperparameters["early_stop_flag"]
 if early_stop_flag:
-    early_stopper = EarlyStopping(patience=3, delta=0.0001, checkpoint_path=checkpoint_path)
+    early_stopper = EarlyStopping(
+        patience=hyperparameters["early_stopping_patience"],
+        delta=hyperparameters["early_stopping_delta"],
+        checkpoint_path=checkpoint_path
+    )
 
 
 # --- Training Loop ---
 
 avg_train_loss = 0.0
-eval_loss = 0.0
-test_loss = 0.0
+# eval_loss = 0.0 # Old
+# test_loss = 0.0 # Old
+eval_loss_real = 0.0
+eval_loss_sim = 0.0
+test_loss_real = 0.0
+test_loss_sim = 0.0
 global_step = 0  # Track total steps across all epochs
 lr_reduction_count = 0 # Initialize LR reduction counter
 
@@ -642,7 +731,7 @@ for epoch in range(num_epochs): # epochs loop
 
         outputs, current_batch_size, labels, inputs_embeds = custom_forward(batch, model)
         logits  = outputs.logits 
-        loss = weighted_loss_calculation(logits, labels, sentinel_ids, keyword_weight, background_weight)
+        loss = weighted_loss_calculation(logits, labels, sentinel_ids, hyperparameters["keyword_weight"], hyperparameters["background_weight"])
                             
         #scaled_loss = loss / accum_steps                                   
         loss.backward()                                             
@@ -686,22 +775,42 @@ for epoch in range(num_epochs): # epochs loop
         torch.cuda.empty_cache()
         
         # Evaluate model every eval_every_n_steps
-        if global_step % eval_every_n_steps == 0:
+        if global_step % hyperparameters["eval_every_n_steps"] == 0:
             # Calculate average training loss for reporting
             current_avg_train_loss = total_train_loss / total_samples if total_samples > 0 else 0
             
             # Run evaluation
-            eval_loss = evaluate_model(model, eval_dataloader, model.device)
-            print(f"Evaluation - Step {global_step}, Avg Train Loss: {current_avg_train_loss:.4f}, Eval Loss: {eval_loss:.4f}")
+            # eval_loss = evaluate_model(model, eval_dataloader, model.device) # Old
+            # print(f"Evaluation - Step {global_step}, Avg Train Loss: {current_avg_train_loss:.4f}, Eval Loss: {eval_loss:.4f}") # Old
             
+            eval_loss_real = evaluate_model(model, eval_dataloader_real, model.device)
+            print(f"Evaluation Real - Step {global_step}, Avg Train Loss: {current_avg_train_loss:.4f}, Eval Loss Real: {eval_loss_real:.4f}")
+            eval_loss_sim = evaluate_model(model, eval_dataloader_sim, model.device)
+            print(f"Evaluation Sim - Step {global_step}, Eval Loss Sim: {eval_loss_sim:.4f}")
+            
+            avg_eval_loss = (eval_loss_real*hyperparameters["real_image_eval_weight"] + eval_loss_sim*hyperparameters["sim_image_eval_weight"]) / (hyperparameters["real_image_eval_weight"] + hyperparameters["sim_image_eval_weight"])
+
             # Run test evaluation
-            test_loss = evaluate_model(model, test_dataloader, model.device)
-            print(f"Test - Step {global_step}, Test Loss: {test_loss:.4f}")
+            # test_loss = evaluate_model(model, test_dataloader, model.device) # Old
+            # print(f"Test - Step {global_step}, Test Loss: {test_loss:.4f}") # Old
+
+            test_loss_real = evaluate_model(model, test_dataloader_real, model.device)
+            print(f"Test Real - Step {global_step}, Test Loss Real: {test_loss_real:.4f}")
+            test_loss_sim = evaluate_model(model, test_dataloader_sim, model.device)
+            print(f"Test Sim - Step {global_step}, Test Loss Sim: {test_loss_sim:.4f}")
+
+            avg_test_loss = (test_loss_real*hyperparameters["real_image_eval_weight"] + test_loss_sim*hyperparameters["sim_image_eval_weight"]) / (hyperparameters["real_image_eval_weight"] + hyperparameters["sim_image_eval_weight"])
             
             # Log evaluation metrics
             wandb.log({
-                "eval_loss": eval_loss,
-                "test_loss": test_loss,
+                # "eval_loss": eval_loss, # Old
+                # "test_loss": test_loss, # Old
+                "eval_loss_real": eval_loss_real,
+                "eval_loss_sim": eval_loss_sim,
+                "avg_eval_loss": avg_eval_loss,
+                "test_loss_real": test_loss_real,
+                "test_loss_sim": test_loss_sim,
+                "avg_test_loss": avg_test_loss,
                 "current_lr": optimizer.param_groups[0]['lr'], # Log current learning rate
                 "step": global_step
             })
@@ -710,28 +819,28 @@ for epoch in range(num_epochs): # epochs loop
             if early_stop_flag:
                 # First fetching the old/current learning rate so that we can compare it to new learning to see it new LR was reduced
                 old_lr = optimizer.param_groups[0]['lr'] # Get LR before potential reduction by scheduler
-                scheduler.step(eval_loss) # Step the scheduler
+                scheduler.step(avg_eval_loss) # Step the scheduler using avg eval loss
                 new_lr = optimizer.param_groups[0]['lr'] # Get LR after potential reduction
 
                 if new_lr < old_lr: # Compare with LR before stepping
-                    print(f"Learning rate reduced from {old_lr} to {new_lr} at step {global_step}")
+                    print(f"Learning rate reduced from {old_lr} to {new_lr} at step {global_step} based on avg_eval_loss")
                     lr_reduction_count += 1
                     wandb.log({"lr_reduction_count": lr_reduction_count, "step": global_step, "epoch": epoch + 1})
                 
-                # Check early stopping
-                if early_stopper.check(eval_loss):
+                # Check early stopping using avg eval loss
+                if early_stopper.check(avg_eval_loss):
                     early_stopper.save_checkpoint(model=model, step=global_step, epoch=epoch+1)
                 else:
                     # Modified early stopping condition based on LR reductions
-                    if lr_reduction_count >= max_lr_reductions and early_stopper.counter >= early_stopper.patience:
-                        print(f"Early stopping triggered: LR reduced {lr_reduction_count} times and eval loss hasn't improved for {early_stopper.patience} evaluations.")
+                    if lr_reduction_count >= hyperparameters["max_lr_reductions"] and early_stopper.counter >= early_stopper.patience:
+                        print(f"Early stopping triggered: LR reduced {lr_reduction_count} times and avg_eval_loss hasn't improved for {early_stopper.patience} evaluations.")
                         early_stopper.early_stop = True
                         break 
                     elif early_stopper.counter >= early_stopper.patience:
-                        print(f"Eval loss hasn't improved for {early_stopper.patience} evaluations, but max LR reductions ({lr_reduction_count}/{max_lr_reductions}) not reached yet. Current LR: {new_lr}. Continuing.")
+                        print(f"Avg_eval_loss hasn't improved for {early_stopper.patience} evaluations, but max LR reductions ({lr_reduction_count}/{hyperparameters['max_lr_reductions']}) not reached yet. Current LR: {new_lr}. Continuing.")
                         # No break here, just a notification. The original early_stopper.early_stop will be True if patience is met.
                         if early_stopper.early_stop: # This condition is from the original EarlyStopping class
-                           print(f"Eval stagnation exceeded patience at step {global_step}, early stopping activated")
+                           print(f"Avg eval loss stagnation exceeded patience at step {global_step}, early stopping activated")
                            break
         
 
@@ -750,16 +859,22 @@ for epoch in range(num_epochs): # epochs loop
     
     # Save first epoch checkpoint
     if epoch == 0:
-        first_epoch_chkpoint = checkpoint_dir+"first_epoch_chkpoint/"
+        first_epoch_chkpoint = os.path.join(hyperparameters["checkpoint_dir"], "first_epoch_chkpoint/")
         model.save_pretrained(first_epoch_chkpoint)
         print(f"first epoch checkpoint saved at time:{time.strftime('%Y-%m-%d %H:%M:%S')}")
         # Add metadata about this checkpoint
         metadata = {
             "epoch": epoch+1,
             "step": global_step,
-            "train_loss": total_train_loss / total_samples,
-            "eval_loss": eval_loss,
-            "test_loss": test_loss,
+            "train_loss": total_train_loss / total_samples if total_samples > 0 else 0.0, # Use current epoch's avg train loss
+            # "eval_loss": eval_loss, # Old
+            # "test_loss": test_loss, # Old
+            "eval_loss_real": eval_loss_real, # Will be 0.0 if no eval step yet, otherwise last eval
+            "eval_loss_sim": eval_loss_sim,   # Will be 0.0 if no eval step yet, otherwise last eval
+            "avg_eval_loss": avg_eval_loss,
+            "test_loss_real": test_loss_real, # Will be 0.0 if no eval step yet, otherwise last eval
+            "test_loss_sim": test_loss_sim,   # Will be 0.0 if no eval step yet, otherwise last eval
+            "avg_test_loss": avg_test_loss,
             "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
 
@@ -773,20 +888,37 @@ run.log_artifact(code_artifact)
 
 # Save the fine-tuned model at the end if early stopping wasn't used
 if not early_stop_flag:
-    final_checkpoint_path = checkpoint_dir+"final_save/"
+    final_checkpoint_path = os.path.join(hyperparameters["checkpoint_dir"], "final_save/")
     model.save_pretrained(final_checkpoint_path)
     
     # Save metadata about the final checkpoint
+    # Use last known average train loss from an eval step, or N/A if no eval step occurred.
+    final_train_loss = current_avg_train_loss if 'current_avg_train_loss' in locals() and global_step > 0 else "N/A"
     metadata = {
-        "final_epoch": num_epochs,
-        "train_loss": avg_train_loss,
-        "eval_loss": eval_loss,
-        "test_loss": test_loss,
+        "final_epoch": epoch + 1, # Actual last epoch completed
+        "train_loss": final_train_loss,
+        # "eval_loss": eval_loss, # Old
+        # "test_loss": test_loss, # Old
+        "eval_loss_real": eval_loss_real,
+        "eval_loss_sim": eval_loss_sim,
+        "avg_eval_loss": avg_eval_loss,
+        "test_loss_real": test_loss_real,
+        "test_loss_sim": test_loss_sim,
+        "avg_test_loss": avg_test_loss,
         "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")
     }
     with open(os.path.join(final_checkpoint_path, "checkpoint_metadata.json"), "w") as f:
         json.dump(metadata, f, indent=4)
     
-    wandb.log({"final_model_epoch": num_epochs, "final_model_loss": eval_loss})
+    wandb.log({
+        "final_model_epoch": epoch + 1,
+        # "final_model_loss": eval_loss # Old
+        "final_model_eval_loss_real": eval_loss_real,
+        "final_model_eval_loss_sim": eval_loss_sim,
+        "final_model_avg_eval_loss": avg_eval_loss,
+        "final_model_test_loss_real": test_loss_real,
+        "final_model_test_loss_sim": test_loss_sim,
+        "final_model_avg_test_loss": avg_test_loss
+        })
 
 wandb.finish()
