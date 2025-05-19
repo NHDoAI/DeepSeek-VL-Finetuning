@@ -88,9 +88,6 @@ hyperparameters["checkpoint_dir"] = os.path.join(
 hyperparameters["best_checkpoint_path_suffix"] = f"best_chkpoint_{hyperparameters['run_name_prefix']}_{eval_mode}/"
 
 
-# Number of training steps between evaluations
-eval_every_n_steps = hyperparameters["eval_every_n_steps"] # Adjust this value as needed
-
 # ------ Define useful functions and classes ------
 
 # --- Function to log memory usage ---
@@ -1020,15 +1017,18 @@ if not early_stop_flag:
     with open(os.path.join(final_checkpoint_path, "checkpoint_metadata.json"), "w") as f:
         json.dump(metadata, f, indent=4)
     
-    wandb.log({
-        "final_model_epoch": epoch + 1,
-        # "final_model_loss": eval_loss # Old
-        "final_model_eval_loss_real": eval_loss_real,
-        "final_model_eval_loss_sim": eval_loss_sim,
-        "final_model_avg_eval_loss": avg_eval_loss,
-        "final_model_test_loss_real": test_loss_real,
-        "final_model_test_loss_sim": test_loss_sim,
-        "final_model_avg_test_loss": avg_test_loss
+    wandb.log({#modify as needed
+            "eval_mode": eval_mode,
+            "final_epoch": epoch+1,
+            "final_step": global_step,
+            #"train_loss": total_epoch_train_loss / total_samples if total_samples > 0 else 0.0, # Use current epoch's avg train loss
+            "final_eval_metric_real": last_eval_loss_real if eval_mode == "loss" else last_overall_eval_acc_real, # Will be 0.0 if no eval step yet, otherwise last eval
+            "final_eval_metric_sim": last_eval_loss_sim if eval_mode == "loss" else last_overall_eval_acc_sim,   # Will be 0.0 if no eval step yet, otherwise last eval
+            "final_avg_eval_metric": last_avg_eval_loss if eval_mode == "loss" else last_avg_eval_acc,
+            "final_test_metric_real": last_test_loss_real if eval_mode == "loss" else last_overall_test_acc_real, # Will be 0.0 if no eval step yet, otherwise last eval
+            "final_test_metric_sim": last_test_loss_sim if eval_mode == "loss" else last_overall_test_acc_sim,   # Will be 0.0 if no eval step yet, otherwise last eval
+            "final_avg_test_metric": last_avg_test_loss if eval_mode == "loss" else last_avg_test_acc,
         })
+
 
 wandb.finish()
