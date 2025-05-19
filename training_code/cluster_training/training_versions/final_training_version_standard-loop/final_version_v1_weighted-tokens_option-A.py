@@ -77,7 +77,23 @@ hyperparameters = {
     "early_stopping_patience": effective_early_stopping_patience,
     "early_stopping_delta": effective_early_stopping_delta,
     "early_stopping_mode": effective_early_stopping_mode,
+    "weight_decay": 0.01,  # Initialized to Phase 1, will be managed by phase logic
+    "beta1": 0.9,          # Added: Beta1 for AdamW
+    "beta2": 0.999,        # Added: Beta2 for AdamW
+    "grad_clip_norm": 1.0, # Initialized to Phase 1, will be managed by phase logic
+
+    # Phase-specific hyperparameters
+    "learning_rate_phases": [2e-4, 1e-4, 5e-5], # LR for Phase 1, Phase 2, Phase 3
+    "weight_decay_phases": [0.01, 0.005, 0.001], # WD for Phase 1, Phase 2, Phase 3
+    "grad_clip_norm_phases": [1.0, 0.8, 0.5],   # Grad Clip for Phase 1, Phase 2, Phase 3
+    "phase_boundaries": [5000, 10000] # global_step counts where phases change
 }
+
+# Initialize with Phase 1 values for optimizer and initial clipping
+hyperparameters["learning_rate"] = hyperparameters["learning_rate_phases"][0]
+hyperparameters["weight_decay"] = hyperparameters["weight_decay_phases"][0]
+hyperparameters["grad_clip_norm"] = hyperparameters["grad_clip_norm_phases"][0]
+
 
 # Construct wandb_run_name, checkpoint_dir and best_checkpoint_path using other hyperparameters
 hyperparameters["wandb_run_name"] = f"{hyperparameters['run_name_prefix']}_{eval_mode}"
@@ -732,8 +748,13 @@ max_lr_reductions = hyperparameters["max_lr_reductions"]
 scheduler_mode = hyperparameters["lr_scheduler_mode"]
 
 #optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4) # torch optimizer
-lr_rate = hyperparameters["learning_rate"]
-optimizer = bnb.optim.AdamW(model.parameters(), lr=lr_rate) # paged optimizer
+lr_rate = hyperparameters["learning_rate"] # Initial LR (Phase 1)
+optimizer = bnb.optim.AdamW(
+    model.parameters(),
+    lr=lr_rate,
+    betas=(hyperparameters["beta1"], hyperparameters["beta2"]),
+    weight_decay=hyperparameters["weight_decay"] # Initial WD (Phase 1)
+) # paged optimizer
 
 # --- Initialize Learning Rate Scheduler ---
 scheduler = ReduceLROnPlateau(
@@ -772,6 +793,14 @@ wandb.config.update(
         "keyword_weight": hyperparameters["keyword_weight"],
         "background_weight": hyperparameters["background_weight"],
         "eval_every_n_steps": hyperparameters["eval_every_n_steps"],
+        "initial_weight_decay": hyperparameters["weight_decay"], # Log initial WD
+        "beta1": hyperparameters["beta1"],
+        "beta2": hyperparameters["beta2"],
+        "initial_grad_clip_norm": hyperparameters["grad_clip_norm"], # Log initial GCN
+        "learning_rate_phases": hyperparameters["learning_rate_phases"], # Log phase LRs
+        "weight_decay_phases": hyperparameters["weight_decay_phases"],   # Log phase WDs
+        "grad_clip_norm_phases": hyperparameters["grad_clip_norm_phases"], # Log phase GCNs
+        "phase_boundaries": hyperparameters["phase_boundaries"]          # Log phase boundaries
     }
     )
 
@@ -802,6 +831,7 @@ test_loss_real = 0.0
 test_loss_sim = 0.0
 global_step = 0  # Track total steps across all epochs
 lr_reduction_count = 0 # Initialize LR reduction counter
+applied_phase_idx = -1 # Initialize applied phase index
 
 last_eval_loss_real = last_sent_eval_acc_real = last_overall_eval_acc_real = last_eval_loss_sim = last_sent_eval_acc_sim = last_overall_eval_acc_sim = last_avg_eval_loss = last_avg_eval_acc = last_test_loss_real = last_sent_test_acc_real = last_overall_test_acc_real = last_test_loss_sim = last_sent_test_acc_sim = last_overall_test_acc_sim = last_avg_test_loss = last_avg_test_acc = 0.0 # initialize variables to store last known evaluation metrics, only for archival purposes. Global scope so can be used anywhere (mainly for logging)
 
@@ -812,6 +842,36 @@ for epoch in range(num_epochs): # epochs loop
     
     for batch_idx, batch in enumerate(train_dataloader): # batches loop
 
+        # --- Phase Management ---
+        current_phase_idx = 0
+        if global_step >= hyperparameters["phase_boundaries"][1]: # Phase 3
+            current_phase_idx = 2
+        elif global_step >= hyperparameters["phase_boundaries"][0]: # Phase 2
+            current_phase_idx = 1
+        # Else: Phase 1 (current_phase_idx remains 0)
+
+        if current_phase_idx != applied_phase_idx:
+            new_lr = hyperparameters["learning_rate_phases"][current_phase_idx]
+            new_wd = hyperparameters["weight_decay_phases"][current_phase_idx]
+            new_gcn = hyperparameters["grad_clip_norm_phases"][current_phase_idx]
+
+            optimizer.param_groups[0]['lr'] = new_lr
+            optimizer.param_groups[0]['weight_decay'] = new_wd
+            hyperparameters["grad_clip_norm"] = new_gcn # Update for clipping logic
+
+            print(f"Global Step {global_step}: Entered Phase {current_phase_idx + 1}. "
+                  f"LR: {new_lr}, WD: {new_wd}, Grad Clip: {new_gcn}")
+            wandb.log({
+                "current_phase": current_phase_idx + 1,
+                "phase_learning_rate": new_lr,
+                "phase_weight_decay": new_wd,
+                "phase_grad_clip_norm": new_gcn,
+                "step": global_step,
+                "epoch": epoch + 1
+            })
+            applied_phase_idx = current_phase_idx
+        # --- End Phase Management ---
+
         outputs, current_batch_size, labels = custom_forward(batch, model)
         logits  = outputs.logits 
         loss = weighted_loss_calculation(logits, labels, sentinel_ids, hyperparameters["keyword_weight"], hyperparameters["background_weight"])
@@ -820,6 +880,10 @@ for epoch in range(num_epochs): # epochs loop
         loss.backward()     
 
         #log_memory_flex("After loss backward:",gpu_id=gpu_id, device_name=device_name)
+
+        # Gradient Clipping
+        if hyperparameters["grad_clip_norm"] > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), hyperparameters["grad_clip_norm"])
 
         optimizer.step()
         optimizer.zero_grad()
@@ -947,7 +1011,7 @@ for epoch in range(num_epochs): # epochs loop
             test_loss_sim, sent_test_acc_sim, overall_test_acc_sim,
             avg_test_loss, avg_test_acc
             """
-            last_eval_loss_real, last_sent_eval_acc_real, last_overall_eval_acc_real, last_eval_loss_sim, last_sent_eval_acc_sim, last_overall_eval_acc_sim, last_avg_eval_loss, last_test_loss_real, last_sent_test_acc_real, last_overall_test_acc_real, last_test_loss_sim, last_sent_test_acc_sim, last_overall_test_acc_sim, last_avg_test_loss, last_avg_test_acc = eval_loss_real, sent_eval_acc_real, overall_eval_acc_real, eval_loss_sim, sent_eval_acc_sim, overall_eval_acc_sim, avg_eval_loss, test_loss_real, sent_test_acc_real, overall_test_acc_real, test_loss_sim, sent_test_acc_sim, overall_test_acc_sim, avg_test_loss, avg_test_acc # update last known evaluation metrics
+            last_eval_loss_real, last_sent_eval_acc_real, last_overall_eval_acc_real, last_eval_loss_sim, last_sent_eval_acc_sim, last_overall_eval_acc_sim, last_avg_eval_loss, last_test_loss_real, last_sent_test_acc_real, last_overall_test_acc_real, last_test_loss_sim, last_sent_test_acc_sim, last_overall_test_acc_sim, last_avg_test_loss, last_avg_test_acc = eval_loss_real, sent_eval_acc_real, overall_eval_acc_real, eval_loss_sim, sent_eval_acc_sim, overall_eval_acc_sim, avg_eval_loss, test_loss_real, sent_test_acc_real, overall_test_acc_real, test_loss_sim, sent_test_acc_sim, overall_test_acc_sim, avg_test_loss, avg_test_acc # update last known evaluation metrics, could have created a list for this and changes them via the list but whatever
 
 
     # If early stopping was triggered, break out of the epoch loop too
