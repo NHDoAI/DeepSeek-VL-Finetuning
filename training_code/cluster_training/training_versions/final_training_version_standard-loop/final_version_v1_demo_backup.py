@@ -575,7 +575,7 @@ if early_stop_flag:
 
 # --- Training Loop ---
 
-avg_train_loss = 0.0
+current_avg_train_loss = 0.0
 eval_loss = 0.0
 test_loss = 0.0
 global_step = 0  # Track total steps across all epochs
@@ -784,7 +784,7 @@ if not early_stop_flag:
     # Save metadata about the final checkpoint
     metadata = {
         "final_epoch": num_epochs,
-        "train_loss": avg_train_loss,
+        "train_loss": current_avg_train_loss,
         "eval_loss": eval_loss,
         "test_loss": test_loss,
         "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")
