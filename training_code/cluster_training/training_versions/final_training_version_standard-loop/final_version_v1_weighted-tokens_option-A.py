@@ -13,7 +13,7 @@ from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoConfig
 from deepseek_vl.models import MultiModalityCausalLM, VLChatProcessor
 from peft import get_peft_model, LoraConfig
 from deepseek_vl.utils.io import load_pil_images
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingWarmRestarts, StepLR
 
 import numpy as np
 
@@ -30,69 +30,79 @@ eval_mode = "accuracy" # "loss" or "accuracy"
 
 # ------ Configuration & Hyperparameters ------
 
-# Define mode-specific parameters first
-if eval_mode == "loss":
-    effective_scheduler_mode = "min"
-    effective_lr_scheduler_patience = 1
-    effective_lr_scheduler_factor = 0.5
-    effective_early_stopping_patience = 3
-    effective_early_stopping_delta = 0.0001
-    effective_early_stopping_mode = "min"
-elif eval_mode == "accuracy":
-    effective_scheduler_mode = "max"
-    effective_lr_scheduler_patience = 2 # Example: might need more patience for accuracy
-    effective_lr_scheduler_factor = 0.5
-    effective_early_stopping_patience = 5 # Example: might need more patience for accuracy
-    effective_early_stopping_delta = 0.001 # Example: Small improvement in accuracy (e.g., 0.1%)
-    effective_early_stopping_mode = "max"
-else:
-    raise ValueError(f"Invalid eval_mode: {eval_mode}. Please choose 'loss' or 'accuracy'.")
-
 hyperparameters = {
 
     "base_checkpoint_dir": "./", # Base directory for checkpoints
-    "run_name_prefix": "1.3b_less-lora_rerun_v7_deterministic_seed", # Prefix for run names and checkpoint subdirs
-    "eval_every_n_steps": 100,
+    "run_name_prefix": "1.3b_test_option-A", # Prefix for run names and checkpoint subdirs
+    "eval_every_n_steps": 5,
     "master_seed": 42,
     "num_workers_dataloader": 4,
     "lora_rank": 6,
     "lora_alpha": 12,
-    "lora_dropout": 0.15,
-    "batch_size": 6,
-    "num_epochs": 25,
+    "lora_dropout": 0.05, # Consider changing between 1.3B and 7B models
+    "batch_size": 1,
+    "max_epochs": 300,
     "min_lr": 1e-6,
     "max_lr_reductions": 3,
-    "learning_rate": 2e-4,
     "early_stop_flag": True,
-    "keyword_weight": 1.5,
-    "background_weight": 1.0,
-    "wandb_project_name": "deepseek-vl-training_final",
+    # "keyword_weight": 1.5,
+    # "background_weight": 1.0,
+    "wandb_project_name": "deepseek-vl-training_final_version",
     "real_image_eval_weight": 1.0,
     "sim_image_eval_weight": 0.5,
 
-    # Effective parameters based on eval_mode
-    "lr_scheduler_mode": effective_scheduler_mode,
-    "lr_scheduler_patience": effective_lr_scheduler_patience,
-    "lr_scheduler_factor": effective_lr_scheduler_factor,
-    "early_stopping_patience": effective_early_stopping_patience,
-    "early_stopping_delta": effective_early_stopping_delta,
-    "early_stopping_mode": effective_early_stopping_mode,
+    # Mode-dependent parameters using inline conditionals
+    "lr_scheduler_mode": "max" if eval_mode == "accuracy" else "min",
+    "lr_scheduler_patience": 2 if eval_mode == "accuracy" else 1,
+    "lr_scheduler_factor": 0.5,
+    "early_stopping_patience": 5 if eval_mode == "accuracy" else 3,
+    "early_stopping_delta": 0.001 if eval_mode == "accuracy" else 0.0001,
+    "early_stopping_mode": "max" if eval_mode == "accuracy" else "min",
     "weight_decay": 0.01,  # Initialized to Phase 1, will be managed by phase logic
     "beta1": 0.9,          # Added: Beta1 for AdamW
-    "beta2": 0.999,        # Added: Beta2 for AdamW
+    "beta2": 0.95,        # Added: Beta2 for AdamW
     "grad_clip_norm": 1.0, # Initialized to Phase 1, will be managed by phase logic
 
     # Phase-specific hyperparameters
-    "learning_rate_phases": [2e-4, 1e-4, 5e-5], # LR for Phase 1, Phase 2, Phase 3
-    "weight_decay_phases": [0.01, 0.005, 0.001], # WD for Phase 1, Phase 2, Phase 3
-    "grad_clip_norm_phases": [1.0, 0.8, 0.5],   # Grad Clip for Phase 1, Phase 2, Phase 3
-    "phase_boundaries": [5000, 10000] # global_step counts where phases change
+    "learning_rate_phases": [2e-4, 3e-5, 2e-5], # LR for Phase 1, Phase 2, Phase 3
+    "weight_decay_phases": [0.0, 0.0, 0.0], # WD for Phase 1, Phase 2, Phase 3
+    "grad_clip_norm_phases": [1.0, 1.0, 1.0],   # Grad Clip for Phase 1, Phase 2, Phase 3
+    "phase_boundaries": [2500, 5000], # global_step counts where phases change
+
+    # --- Phase-specific Learning Rate Scheduler Hyperparameters ---
+    "lr_scheduler_types_phases": ["CosineAnnealingWarmRestarts", "StepLR", "StepLR"], # Scheduler type for each phase
+
+    # Parameters for CosineAnnealingWarmRestarts (used if "CosineAnnealingWarmRestarts" is selected for a phase)
+    # T_0: Number of iterations for the first restart.
+    # T_mult: A factor increases T_i after a restart. T_i = T_i * T_mult.
+    # User needs to set these carefully based on phase length and desired restart behavior.
+    # Example: If a phase has 5000 steps, T_0=1000, T_mult=1 means 5 restarts. T_0=1000, T_mult=2 means restarts at 1000, 1000+2000=3000.
+    "cosine_warm_restarts_t_0_phases": [1000, 1000, 1500], # Example T_0 values for each phase
+    "cosine_warm_restarts_t_mult_phases": [1, 1, 1],      # Example T_mult values for each phase
+
+    # Parameters for StepLR (used if "StepLR" is selected for a phase)
+    "step_lr_step_size_phases": [1000, 1000, 500], # step_size for StepLR for each phase
+    "step_lr_gamma_phases": [0.7, 0.5, 0.5],       # gamma for StepLR for each phase
+
+    # --- Phase-specific Token Weights and Eval Frequency ---
+    "keyword_weight_phases": [1.0, 1.5, 1.5],       # Keyword token weight for each phase
+    "background_weight_phases": [1.0, 1, 0.5],    # Background token weight for each phase
+    "eval_every_n_steps_phases": [500, 250, 100],   # Evaluation frequency for each phase
+
+    # Note: "lr_scheduler_patience", "lr_scheduler_factor", "lr_scheduler_mode", "min_lr",
+    # "max_lr_reductions" are still in hyperparameters.
+    # "min_lr" is used by ReduceLROnPlateau and CosineAnnealingWarmRestarts.
+    # The others are primarily for ReduceLROnPlateau.
 }
 
 # Initialize with Phase 1 values for optimizer and initial clipping
 hyperparameters["learning_rate"] = hyperparameters["learning_rate_phases"][0]
 hyperparameters["weight_decay"] = hyperparameters["weight_decay_phases"][0]
 hyperparameters["grad_clip_norm"] = hyperparameters["grad_clip_norm_phases"][0]
+# Initialize phase-dependent token weights and eval frequency
+hyperparameters["keyword_weight"] = hyperparameters["keyword_weight_phases"][0]
+hyperparameters["background_weight"] = hyperparameters["background_weight_phases"][0]
+hyperparameters["eval_every_n_steps"] = hyperparameters["eval_every_n_steps_phases"][0]
 
 
 # Construct wandb_run_name, checkpoint_dir and best_checkpoint_path using other hyperparameters
@@ -496,6 +506,7 @@ def worker_init_fn(worker_id):
 run = wandb.init(
     project=hyperparameters["wandb_project_name"],  # name of your project in wandb
     name=hyperparameters["wandb_run_name"], # Constructing a more dynamic run name
+    mode="disabled"
 )
 
 # --- Load environment variables ---
@@ -566,7 +577,67 @@ sentinel_ids = {tok: tokenizer.convert_tokens_to_ids(tok)
 keyword_weight     = hyperparameters["keyword_weight"]                                            
 background_weight  = hyperparameters["background_weight"]                                            
 # you must resize *before* loading LoRA (adds new rows to the LM)    
-model.resize_token_embeddings(len(tokenizer))    
+model.language_model.resize_token_embeddings(len(tokenizer))    
+
+# ---- MONKEY PATCH START ----
+# This is necessary because the MultiModalityCausalLM class does not
+# implement get_input_embeddings and get_output_embeddings, which PEFT
+# needs when saving the model, especially if embeddings are in modules_to_save.
+# We forcefully overwrite these methods on the instance.
+# This version attempts to directly access the embedding layers from the language_model.
+import types
+
+def get_input_embeddings_direct_access(self_mm_model):
+    """
+    Directly accesses the input embeddings from the language_model,
+    assuming it's a standard HF model structure (e.g., LlamaForCausalLM).
+    """
+    if hasattr(self_mm_model, 'language_model'):
+        lang_model = self_mm_model.language_model
+        if hasattr(lang_model, 'model') and hasattr(lang_model.model, 'embed_tokens'):
+            # Common path for models like LlamaForCausalLM -> language_model.model.embed_tokens
+            return lang_model.model.embed_tokens
+        elif hasattr(lang_model, 'embed_tokens'):
+            # Common path for models like LlamaModel (if language_model was just the base model)
+            return lang_model.embed_tokens
+        # Add other known paths if necessary for different architectures, e.g., GPT-2 style:
+        # elif hasattr(lang_model, 'transformer') and hasattr(lang_model.transformer, 'wte'):
+        #     return lang_model.transformer.wte
+    raise AttributeError(
+        "MultiModalityCausalLM's language_model does not have the expected attribute structure "
+        "for input embeddings (e.g., language_model.model.embed_tokens or language_model.embed_tokens)."
+    )
+
+model.get_input_embeddings = types.MethodType(get_input_embeddings_direct_access, model)
+print("Monkey-patched get_input_embeddings onto the MultiModalityCausalLM instance using direct attribute access.")
+
+def get_output_embeddings_direct_access(self_mm_model):
+    """
+    Directly accesses the output embeddings (lm_head) from the language_model,
+    assuming it's a standard HF CausalLM model.
+    """
+    if hasattr(self_mm_model, 'language_model') and hasattr(self_mm_model.language_model, 'lm_head'):
+        # Common path for CausalLM models -> language_model.lm_head
+        return self_mm_model.language_model.lm_head
+    # Fallback for models where get_output_embeddings might not be explicitly defined
+    # or lm_head is not the direct attribute, but its own method might work (less likely given the issue)
+    elif hasattr(self_mm_model, 'language_model') and hasattr(self_mm_model.language_model, 'get_output_embeddings'):
+        try:
+            # Try calling the language_model's own method as a last resort
+            output_embeds = self_mm_model.language_model.get_output_embeddings()
+            if output_embeds is not None:
+                print("Warning: Used language_model.get_output_embeddings() as fallback for monkey-patch.")
+                return output_embeds
+        except NotImplementedError:
+            pass # If it raises, we fall through to the AttributeError
+    raise AttributeError(
+        "MultiModalityCausalLM's language_model does not have the expected lm_head attribute "
+        "or a working get_output_embeddings method for output embeddings."
+    )
+
+model.get_output_embeddings = types.MethodType(get_output_embeddings_direct_access, model)
+print("Monkey-patched get_output_embeddings onto the MultiModalityCausalLM instance using direct attribute access.")
+# ---- MONKEY PATCH END ----
 
 # --- Apply LoRA Adapters to the Modules via configs ---
 
@@ -587,21 +658,22 @@ if model_type == "1.3B":
         lora_dropout=lora_dropout,
         bias="none",
         task_type="CAUSAL_LM",
-        modules_to_save=["embed_tokens"]
+        modules_to_save=["language_model.model.embed_tokens"]
     )
 elif model_type == "7B":
     # --- 7b model ---
     lora_config = LoraConfig( #to be modified
         r=lora_rank,
         lora_alpha=lora_alpha,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", #language model
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "lm_head", #language model
                         "gate_proj", "up_proj", "down_proj", #language model
-                        "attn.qkv", "attn.proj", "fc1", "fc2","patch_embed.proj", "attn_pool.q", "attn_pool.kv", #vision model
-                        #"aligner.high_up_proj", "aligner.low_up_proj", "aligner.layers.1"
+                        "attn.qkv", "attn.proj", "fc1", "fc2","patch_embed.proj", "attn_pool.q", "attn_pool.kv", "lin1", "lin2" #vision model
+                        "aligner.high_up_proj", "aligner.low_up_proj" #"aligner.layers.1"
                         ], #aligner
         lora_dropout=lora_dropout,
         bias="none",
-        task_type="CAUSAL_LM"
+        task_type="CAUSAL_LM",
+        modules_to_save=["language_model.model.embed_tokens"]
     )
 
 # --- Load Model with LoRA Adapters ---
@@ -738,13 +810,13 @@ code_artifact = wandb.Artifact(name="training_code", type="code")
 code_artifact.add_file(script_name)
 
 # --- Define number of epochs ---
-num_epochs = hyperparameters["num_epochs"]
+max_epochs = hyperparameters["max_epochs"]
 
 # --- Scheduler Hyperparameters ---
 lr_scheduler_patience = hyperparameters["lr_scheduler_patience"]
 lr_scheduler_factor = hyperparameters["lr_scheduler_factor"]
 min_lr = hyperparameters["min_lr"]
-max_lr_reductions = hyperparameters["max_lr_reductions"]
+#max_lr_reductions = hyperparameters["max_lr_reductions"]
 scheduler_mode = hyperparameters["lr_scheduler_mode"]
 
 #optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4) # torch optimizer
@@ -757,21 +829,15 @@ optimizer = bnb.optim.AdamW(
 ) # paged optimizer
 
 # --- Initialize Learning Rate Scheduler ---
-scheduler = ReduceLROnPlateau(
-    optimizer,
-    mode=scheduler_mode,
-    factor=lr_scheduler_factor,
-    patience=lr_scheduler_patience,
-    verbose=True,
-    min_lr=min_lr
-)
+scheduler = None # Will be initialized dynamically based on phase
+current_scheduler_type = None # To track the current scheduler type
 
 wandb.config.update(
     {
         # optional: hyperparameter logging
         "run_name": hyperparameters["wandb_run_name"],
         "batch_size": hyperparameters["batch_size"],
-        "num_epochs": hyperparameters["num_epochs"],
+        "max_epochs": hyperparameters["max_epochs"],
         "learning_rate": hyperparameters["learning_rate"],
         "optimizer": "AdamW (bnb)",
         "quantization": "4-bit",
@@ -800,7 +866,19 @@ wandb.config.update(
         "learning_rate_phases": hyperparameters["learning_rate_phases"], # Log phase LRs
         "weight_decay_phases": hyperparameters["weight_decay_phases"],   # Log phase WDs
         "grad_clip_norm_phases": hyperparameters["grad_clip_norm_phases"], # Log phase GCNs
-        "phase_boundaries": hyperparameters["phase_boundaries"]          # Log phase boundaries
+        "phase_boundaries": hyperparameters["phase_boundaries"],          # Log phase boundaries
+
+        # Log new scheduler hyperparameters
+        "lr_scheduler_types_phases": hyperparameters["lr_scheduler_types_phases"],
+        "cosine_warm_restarts_t_0_phases": hyperparameters["cosine_warm_restarts_t_0_phases"],
+        "cosine_warm_restarts_t_mult_phases": hyperparameters["cosine_warm_restarts_t_mult_phases"],
+        "step_lr_step_size_phases": hyperparameters["step_lr_step_size_phases"],
+        "step_lr_gamma_phases": hyperparameters["step_lr_gamma_phases"],
+
+        # Log new phase-dependent general hyperparameters
+        "keyword_weight_phases": hyperparameters["keyword_weight_phases"],
+        "background_weight_phases": hyperparameters["background_weight_phases"],
+        "eval_every_n_steps_phases": hyperparameters["eval_every_n_steps_phases"],
     }
     )
 
@@ -832,10 +910,11 @@ test_loss_sim = 0.0
 global_step = 0  # Track total steps across all epochs
 lr_reduction_count = 0 # Initialize LR reduction counter
 applied_phase_idx = -1 # Initialize applied phase index
+steps_in_current_phase_for_eval_counter = 0 # Counter for phase-specific evaluation frequency
 
 last_eval_loss_real = last_sent_eval_acc_real = last_overall_eval_acc_real = last_eval_loss_sim = last_sent_eval_acc_sim = last_overall_eval_acc_sim = last_avg_eval_loss = last_avg_eval_acc = last_test_loss_real = last_sent_test_acc_real = last_overall_test_acc_real = last_test_loss_sim = last_sent_test_acc_sim = last_overall_test_acc_sim = last_avg_test_loss = last_avg_test_acc = 0.0 # initialize variables to store last known evaluation metrics, only for archival purposes. Global scope so can be used anywhere (mainly for logging)
 
-for epoch in range(num_epochs): # epochs loop
+for epoch in range(max_epochs): # epochs loop
     #total_epoch_train_loss = 0.0
     num_batches = 0
     total_samples = 0
@@ -854,21 +933,73 @@ for epoch in range(num_epochs): # epochs loop
             new_lr = hyperparameters["learning_rate_phases"][current_phase_idx]
             new_wd = hyperparameters["weight_decay_phases"][current_phase_idx]
             new_gcn = hyperparameters["grad_clip_norm_phases"][current_phase_idx]
+            new_scheduler_type = hyperparameters["lr_scheduler_types_phases"][current_phase_idx]
+            new_keyword_weight = hyperparameters["keyword_weight_phases"][current_phase_idx]
+            new_background_weight = hyperparameters["background_weight_phases"][current_phase_idx]
+            new_eval_every_n_steps = hyperparameters["eval_every_n_steps_phases"][current_phase_idx]
 
             optimizer.param_groups[0]['lr'] = new_lr
             optimizer.param_groups[0]['weight_decay'] = new_wd
             hyperparameters["grad_clip_norm"] = new_gcn # Update for clipping logic
+            hyperparameters["keyword_weight"] = new_keyword_weight # Update for loss calculation
+            hyperparameters["background_weight"] = new_background_weight # Update for loss calculation
+            hyperparameters["eval_every_n_steps"] = new_eval_every_n_steps # Update for eval frequency
+
+            steps_in_current_phase_for_eval_counter = 0 # Reset eval counter for the new phase
 
             print(f"Global Step {global_step}: Entered Phase {current_phase_idx + 1}. "
-                  f"LR: {new_lr}, WD: {new_wd}, Grad Clip: {new_gcn}")
+                  f"LR: {new_lr}, WD: {new_wd}, Grad Clip: {new_gcn}, Scheduler: {new_scheduler_type}, "
+                  f"Keyword Weight: {new_keyword_weight}, Background Weight: {new_background_weight}, "
+                  f"Eval Every: {new_eval_every_n_steps} steps")
             wandb.log({
                 "current_phase": current_phase_idx + 1,
                 "phase_learning_rate": new_lr,
                 "phase_weight_decay": new_wd,
                 "phase_grad_clip_norm": new_gcn,
+                "phase_scheduler_type": new_scheduler_type,
+                "phase_keyword_weight": new_keyword_weight,
+                "phase_background_weight": new_background_weight,
+                "phase_eval_every_n_steps": new_eval_every_n_steps,
                 "step": global_step,
                 "epoch": epoch + 1
             })
+            
+            # --- Initialize or Re-initialize Scheduler for the new phase ---
+            if new_scheduler_type != current_scheduler_type or scheduler is None:
+                print(f"Initializing scheduler for Phase {current_phase_idx + 1}: {new_scheduler_type}")
+                if new_scheduler_type == "ReduceLROnPlateau":
+                    scheduler = ReduceLROnPlateau(
+                        optimizer,
+                        mode=hyperparameters["lr_scheduler_mode"],
+                        factor=hyperparameters["lr_scheduler_factor"],
+                        patience=hyperparameters["lr_scheduler_patience"],
+                        verbose=True,
+                        min_lr=hyperparameters["min_lr"]
+                    )
+                elif new_scheduler_type == "CosineAnnealingWarmRestarts":
+                    t_0_current_phase = hyperparameters["cosine_warm_restarts_t_0_phases"][current_phase_idx]
+                    t_mult_current_phase = hyperparameters["cosine_warm_restarts_t_mult_phases"][current_phase_idx]
+                    scheduler = CosineAnnealingWarmRestarts(
+                        optimizer,
+                        T_0=t_0_current_phase,
+                        T_mult=t_mult_current_phase,
+                        eta_min=hyperparameters["min_lr"],
+                        verbose=True,
+                        last_epoch=-1
+                    )
+                elif new_scheduler_type == "StepLR":
+                    step_size_current_phase = hyperparameters["step_lr_step_size_phases"][current_phase_idx]
+                    gamma_current_phase = hyperparameters["step_lr_gamma_phases"][current_phase_idx]
+                    scheduler = StepLR(
+                        optimizer,
+                        step_size=step_size_current_phase,
+                        gamma=gamma_current_phase,
+                        verbose=True
+                    )
+                else:
+                    raise ValueError(f"Unsupported scheduler type: {new_scheduler_type} for phase {current_phase_idx + 1}")
+                current_scheduler_type = new_scheduler_type
+            
             applied_phase_idx = current_phase_idx
         # --- End Phase Management ---
 
@@ -879,7 +1010,7 @@ for epoch in range(num_epochs): # epochs loop
         #scaled_loss = loss / accum_steps                                   
         loss.backward()     
 
-        #log_memory_flex("After loss backward:",gpu_id=gpu_id, device_name=device_name)
+        log_memory_flex("After loss backward:",gpu_id=gpu_id, device_name=device_name)
 
         # Gradient Clipping
         if hyperparameters["grad_clip_norm"] > 0:
@@ -888,15 +1019,20 @@ for epoch in range(num_epochs): # epochs loop
         optimizer.step()
         optimizer.zero_grad()
 
+        # --- Step LR Schedulers that are not ReduceLROnPlateau ---
+        if current_scheduler_type in ["CosineAnnealingWarmRestarts", "StepLR"] and scheduler is not None:
+            scheduler.step()
+
         log_memory_flex("After parameters update:",gpu_id=gpu_id, device_name=device_name)
 
         #total_epoch_train_loss += loss.item()*current_batch_size # loss.item() returns singular value of loss, also bring it back to CPU so can be mulitplied with current_batch_size
         total_samples += current_batch_size
         num_batches += 1
         global_step += 1
+        steps_in_current_phase_for_eval_counter += 1
 
         # Log current batch loss
-        print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Step {global_step}, Loss: {loss.item():.4f}")
+        print(f"Epoch {epoch+1}/{max_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Step {global_step}, Loss: {loss.item():.4f}")
 
         wandb.log({
             "train_loss": loss.item(),
@@ -909,8 +1045,8 @@ for epoch in range(num_epochs): # epochs loop
         del loss
         torch.cuda.empty_cache()
         
-        # Evaluate model every eval_every_n_steps
-        if global_step % hyperparameters["eval_every_n_steps"] == 0:
+        # Evaluate model every eval_every_n_steps (phase specific)
+        if steps_in_current_phase_for_eval_counter % hyperparameters["eval_every_n_steps"] == 0:
             # Calculate average training loss for reporting
             #current_avg_train_loss = total_epoch_train_loss / total_samples if total_samples > 0 else 0
             #, Avg Train Loss: {current_avg_train_loss:.4f}
@@ -965,28 +1101,35 @@ for epoch in range(num_epochs): # epochs loop
             })
             if eval_mode == "loss":
                 evaluation_metric = avg_eval_loss
-                print(f"Using avg_eval_loss ({avg_eval_loss:.4f}) for LR scheduling and early stopping.")
+                print(f"Using Average Eval Loss ({avg_eval_loss:.4f}) for LR scheduling and early stopping.")
             elif eval_mode == "accuracy":
                 evaluation_metric = avg_eval_acc
-                print(f"Using avg_eval_acc ({avg_eval_acc:.4f}) for LR scheduling and early stopping.")
+                print(f"Using Average Eval Accuracy ({avg_eval_acc:.4f}) for LR scheduling and early stopping.")
             else:
                 # This check is also done when setting hyperparameters, but good for safety
                 raise ValueError(f"Invalid eval_mode: {eval_mode}. Please choose 'loss' or 'accuracy'.")
 
             # --- Learning Rate Scheduler and Early Stopping Logic ---
             if early_stop_flag:
-
-
-                # First fetching the old/current learning rate so that we can compare it to new learning to see it new LR was reduced
                 old_lr = optimizer.param_groups[0]['lr'] # Get LR before potential reduction by scheduler
-                scheduler.step(evaluation_metric) # Step the scheduler using the chosen evaluation_metric
-                new_lr = optimizer.param_groups[0]['lr'] # Get LR after potential reduction
 
-                if new_lr < old_lr: # Compare with LR before stepping
-                    print(f"Learning rate reduced from {old_lr} to {new_lr} at step {global_step} based on {eval_mode} metric: {evaluation_metric:.4f}")
-                    lr_reduction_count += 1
-                    wandb.log({"lr_reduction_count": lr_reduction_count, "step": global_step, "epoch": epoch + 1})
-                
+                if current_scheduler_type == "ReduceLROnPlateau" and scheduler is not None:
+                    scheduler.step(evaluation_metric) # Step the scheduler using the chosen evaluation_metric
+                    new_lr = optimizer.param_groups[0]['lr'] # Get LR after potential reduction
+
+                    if new_lr < old_lr: # Compare with LR before stepping
+                        print(f"Learning rate reduced from {old_lr} to {new_lr} at step {global_step} by ReduceLROnPlateau based on {eval_mode} metric: {evaluation_metric:.4f}")
+                        lr_reduction_count += 1
+                        wandb.log({"lr_reduction_count": lr_reduction_count, "step": global_step, "epoch": epoch + 1})
+                elif scheduler is not None: # For CosineAnnealingWarmRestarts or StepLR, LR is already stepped per batch
+                    new_lr = optimizer.param_groups[0]['lr']
+                    if new_lr != old_lr: # Log if LR changed (it usually will for these schedulers)
+                         print(f"LR updated by {current_scheduler_type} to {new_lr} at step {global_step}.")
+                else: # No scheduler active or an issue
+                    new_lr = old_lr
+                    print("Warning: No active scheduler to step for ReduceLROnPlateau logic, or scheduler is None.")
+
+
                 # Check early stopping using the chosen evaluation_metric
                 if early_stopper.check(evaluation_metric):
                     early_stopper.save_checkpoint(model=model, step=global_step, epoch=epoch+1)
@@ -1019,7 +1162,7 @@ for epoch in range(num_epochs): # epochs loop
         break
 
     epoch_time = time.time() - start_time
-    print(f"Epoch {epoch+1}/{num_epochs} completed - Time: {epoch_time:.2f} seconds")
+    print(f"Epoch {epoch+1}/{max_epochs} completed - Time: {epoch_time:.2f} seconds")
    
     wandb.log({
         "epoch_time": epoch_time,
