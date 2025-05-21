@@ -25,10 +25,11 @@ cluster_flag = True
 model_type = "1.3B"
 eval_mode = "accuracy" # "loss" or "accuracy"
 
-#to be modified
-#checkpoint_dir = "./1.3b_less-lora_rerun_v7_deterministic_seed/"
 
 # ------ Configuration & Hyperparameters ------
+
+phase_2_start = 4000
+phase_3_start = 5000
 
 hyperparameters = {
 
@@ -41,10 +42,11 @@ hyperparameters = {
     "lora_alpha": 12,
     "lora_dropout": 0.05, # Consider changing between 1.3B and 7B models
     "batch_size": 1,
-    "max_epochs": 300,
+    "max_epochs": 30,
     "min_lr": 1e-6,
-    "max_lr_reductions": 3,
-    "early_stop_flag": True,
+    "max_lr_reductions": 4,
+    "early_stopping_enabled_globally": True, # New: Master switch for dynamic early stopping
+    "early_stopping_active_ranges": [[phase_2_start, 20000]], # New: List of [start_step, end_step] ranges for active early stopping. Example: [[0, 2000], [4000, 6000]]
     # "keyword_weight": 1.5,
     # "background_weight": 1.0,
     "wandb_project_name": "deepseek-vl-training_final_version",
@@ -56,6 +58,7 @@ hyperparameters = {
     "lr_scheduler_patience": 2 if eval_mode == "accuracy" else 1,
     "lr_scheduler_factor": 0.5,
     "early_stopping_patience": 5 if eval_mode == "accuracy" else 3,
+
     "improvement_delta": 0.001 if eval_mode == "accuracy" else 0.0001,
     "weight_decay": 0.01,  # Initialized to Phase 1, will be managed by phase logic
     "beta1": 0.9,          # Added: Beta1 for AdamW
@@ -66,27 +69,27 @@ hyperparameters = {
     "learning_rate_phases": [2e-4, 3e-5, 2e-5], # LR for Phase 1, Phase 2, Phase 3
     "weight_decay_phases": [0.0, 0.0, 0.0], # WD for Phase 1, Phase 2, Phase 3
     "grad_clip_norm_phases": [1.0, 1.0, 1.0],   # Grad Clip for Phase 1, Phase 2, Phase 3
-    "phase_boundaries": [2500, 5000], # global_step counts where phases change
+    "phase_boundaries": [phase_2_start, phase_3_start], # global_step counts where phases change
 
     # --- Phase-specific Learning Rate Scheduler Hyperparameters ---
-    "lr_scheduler_types_phases": ["CosineAnnealingWarmRestarts", "StepLR", "StepLR"], # Scheduler type for each phase
+    "lr_scheduler_types_phases": ["CosineAnnealingWarmRestarts", "CosineAnnealingWarmRestarts", "ReduceLROnPlateau"], # Scheduler type for each phase
 
     # Parameters for CosineAnnealingWarmRestarts (used if "CosineAnnealingWarmRestarts" is selected for a phase)
     # T_0: Number of iterations for the first restart.
     # T_mult: A factor increases T_i after a restart. T_i = T_i * T_mult.
     # User needs to set these carefully based on phase length and desired restart behavior.
     # Example: If a phase has 5000 steps, T_0=1000, T_mult=1 means 5 restarts. T_0=1000, T_mult=2 means restarts at 1000, 1000+2000=3000.
-    "cosine_warm_restarts_t_0_phases": [1000, 1000, 1500], # Example T_0 values for each phase
+    "cosine_warm_restarts_t_0_phases": [1000, 1000, 1000], # Example T_0 values for each phase
     "cosine_warm_restarts_t_mult_phases": [1, 1, 1],      # Example T_mult values for each phase
 
     # Parameters for StepLR (used if "StepLR" is selected for a phase)
-    "step_lr_step_size_phases": [1000, 1000, 500], # step_size for StepLR for each phase
+    "step_lr_step_size_phases": [200, 200, 100], # step_size for StepLR for each phase
     "step_lr_gamma_phases": [0.7, 0.5, 0.5],       # gamma for StepLR for each phase
 
     # --- Phase-specific Token Weights and Eval Frequency ---
     "keyword_weight_phases": [1.0, 1.5, 1.5],       # Keyword token weight for each phase
     "background_weight_phases": [1.0, 1, 0.5],    # Background token weight for each phase
-    "eval_every_n_steps_phases": [500, 250, 100],   # Evaluation frequency for each phase
+    "eval_every_n_steps_phases": [500, 200, 100],   # Evaluation frequency for each phase
 
     # Note: "lr_scheduler_patience", "lr_scheduler_factor", "lr_scheduler_mode", "min_lr",
     # "max_lr_reductions" are still in hyperparameters.
@@ -914,6 +917,12 @@ wandb.config.update(
         "keyword_weight_phases": hyperparameters["keyword_weight_phases"],
         "background_weight_phases": hyperparameters["background_weight_phases"],
         "eval_every_n_steps_phases": hyperparameters["eval_every_n_steps_phases"],
+
+        # Log new early stopping hyperparameters
+        "early_stopping_enabled_globally": hyperparameters.get("early_stopping_enabled_globally", False),
+        "early_stopping_active_ranges": hyperparameters.get("early_stopping_active_ranges", []),
+        "real_image_eval_weight": hyperparameters["real_image_eval_weight"],
+        "sim_image_eval_weight": hyperparameters["sim_image_eval_weight"],
     }
     )
 
@@ -926,15 +935,7 @@ model.train()
 initialize_global_best_metric(eval_mode)
 
 # --- Enable/Disable early stopping ---
-early_stop_flag = hyperparameters["early_stop_flag"]
-if early_stop_flag:
-    # EarlyStopper now only needs patience.
-    # The other parameters (delta, checkpoint_path, mode) will be used directly
-    # by the save_checkpoint_if_improved function.
-    early_stopper = EarlyStopping(
-        patience=hyperparameters["early_stopping_patience"]
-    )
-    # The checkpoint_path for saving the best model is defined later and used directly.
+early_stopper = None # Initialize early_stopper to None. It will be created dynamically.
 
 
 # --- Training Loop ---
@@ -1139,6 +1140,28 @@ for epoch in range(max_epochs): # epochs loop
                 "step": global_step
             })
 
+            # --- Determine if early stopping is active for the current step ---
+            is_early_stop_active_now = False
+            if hyperparameters.get("early_stopping_enabled_globally", False):
+                active_ranges = hyperparameters.get("early_stopping_active_ranges", [])
+                for start_step, end_step in active_ranges:
+                    if start_step <= global_step <= end_step:
+                        is_early_stop_active_now = True
+                        break
+            
+            # Manage early_stopper instance based on current activity
+            if is_early_stop_active_now:
+                if early_stopper is None: # True if first time active in a range, or reactivated
+                    early_stopper = EarlyStopping(patience=hyperparameters["early_stopping_patience"])
+                    print(f"Global Step {global_step}: Early stopping is NOW ACTIVE (within range [{start_step if 'start_step' in locals() else 'N/A'}, {end_step if 'end_step' in locals() else 'N/A'}]). Patience reset.")
+                    wandb.log({"early_stopping_status": "activated", "step": global_step, "epoch": epoch + 1})
+                # else: early_stopper already exists and is active, continue using it
+            else: # Early stopping is not active for this step
+                if early_stopper is not None: # True if it was active in the previous eval step and now is not
+                    print(f"Global Step {global_step}: Early stopping is NOW INACTIVE (outside active range or globally disabled).")
+                    wandb.log({"early_stopping_status": "deactivated", "step": global_step, "epoch": epoch + 1})
+                early_stopper = None # Ensure it's None if not active
+
 
             if eval_mode == "loss":
                 evaluation_metric = avg_eval_loss
@@ -1169,11 +1192,11 @@ for epoch in range(max_epochs): # epochs loop
 
             
             # --- Learning Rate Scheduler and Early Stopping Logic ---
-            if early_stop_flag:
+            if is_early_stop_active_now and early_stopper is not None: # Check if active and instance exists
                
                 # Check early stopping using the chosen evaluation_metric
                 # The save_checkpoint_if_improved function now handles the logic of comparing with best_metric_value_global
-                # and saving if improvement is met according to hyperparameters["early_stopping_delta"]
+                # and saving if improvement is met according to hyperparameters["improvement_delta"]
             
                 early_stopper.check(metric_improved_and_checkpoint_saved) # reset internal counter if improved is true, otherwise increase by 1. If patience is met, set patience_met to True
 
@@ -1183,21 +1206,25 @@ for epoch in range(max_epochs): # epochs loop
                         if lr_reduction_monitor.lr_reduction_count >= hyperparameters["max_lr_reductions"]:
                             print(f"Early stopping triggered: LR reduced {lr_reduction_monitor.lr_reduction_count}/{hyperparameters['max_lr_reductions']} times and {eval_mode} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met). Early stopping.")
                             stop_training = True
-                            break
+                            # break # This break is for the batch loop, outer loop break is handled below
                         else:
-                            print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met), but max LR reductions ({lr_reduction_monitor.lr_reduction_count}/{hyperparameters['max_lr_reductions']}) not reached yet. Current LR: {new_lr}. Continuing training.")
-                            stop_training = False # redudant set to False, but good for clarity and safety
-                    else:
-                        new_lr = optimizer.param_groups[0]['lr']
-                        print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met), scheduler is {current_scheduler_type}. Early stopping.")
+                            print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met), but max LR reductions ({lr_reduction_monitor.lr_reduction_count}/{hyperparameters['max_lr_reductions']}) not reached yet. Current LR: {optimizer.param_groups[0]['lr']}. Continuing training.")
+                            # stop_training = False # redundant set to False, but good for clarity and safety
+                    else: # Schedulers other than ReduceLROnPlateau, or no scheduler
+                        current_lr_val = optimizer.param_groups[0]['lr']
+                        print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met). Scheduler is {current_scheduler_type}. Current LR: {current_lr_val}. Early stopping.")
                         stop_training = True
-                        break
+                        # break # This break is for the batch loop, outer loop break is handled below
             
             last_eval_loss_real, last_sent_eval_acc_real, last_overall_eval_acc_real, last_eval_loss_sim, last_sent_eval_acc_sim, last_overall_eval_acc_sim, last_avg_eval_loss, last_test_loss_real, last_sent_test_acc_real, last_overall_test_acc_real, last_test_loss_sim, last_sent_test_acc_sim, last_overall_test_acc_sim, last_avg_test_loss, last_avg_test_acc = eval_loss_real, sent_eval_acc_real, overall_eval_acc_real, eval_loss_sim, sent_eval_acc_sim, overall_eval_acc_sim, avg_eval_loss, test_loss_real, sent_test_acc_real, overall_test_acc_real, test_loss_sim, sent_test_acc_sim, overall_test_acc_sim, avg_test_loss, avg_test_acc # update last known evaluation metrics, could have created a list for this and changes them via the list but whatever
 
+        # If early stopping was triggered from within the evaluation block, break batch loop
+        if stop_training:
+            break
 
     # If early stopping was triggered, break out of the epoch loop too
-    if early_stop_flag and stop_training:
+    if stop_training:
+        print(f"Step {global_step} at Epoch {epoch+1}: Early stopping triggered. Breaking epoch loop.")
         break
 
     epoch_time = time.time() - start_time
@@ -1238,7 +1265,9 @@ run.log_artifact(dataset_artifact)
 run.log_artifact(code_artifact)
 
 # Save the fine-tuned model at the end if early stopping wasn't used
-if not early_stop_flag:
+if not hyperparameters.get("early_stopping_enabled_globally", False):
+    # This means dynamic early stopping was globally disabled.
+    # Save the model as it completed all epochs or was stopped by other means.
     final_checkpoint_path = os.path.join(hyperparameters["checkpoint_dir"], "final_save/")
     model.save_pretrained(final_checkpoint_path)
     
@@ -1275,6 +1304,22 @@ if not early_stop_flag:
             "final_test_metric_sim": last_test_loss_sim if eval_mode == "loss" else last_overall_test_acc_sim,   # Will be 0.0 if no eval step yet, otherwise last eval
             "final_avg_test_metric": last_avg_test_loss if eval_mode == "loss" else last_avg_test_acc,
         })
+elif stop_training: # Dynamic early stopping was enabled and it triggered a stop
+    print(f"Training was stopped early at step {global_step} due to dynamic early stopping criteria. The 'best' model is already saved in {best_checkpoint_path}.")
+    wandb.log({
+        "training_outcome": "early_stopped_dynamically",
+        "final_epoch_at_stop": epoch + 1,
+        "final_step_at_stop": global_step,
+        "best_model_location": best_checkpoint_path
+    })
+else: # Dynamic early stopping was enabled, but training completed all epochs without triggering a stop
+    print(f"Training completed all {max_epochs} epochs. Dynamic early stopping was enabled but not triggered. The 'best' model is already saved in {best_checkpoint_path}.")
+    wandb.log({
+        "training_outcome": "completed_all_epochs_early_stopping_enabled_not_triggered",
+        "final_epoch": epoch + 1,
+        "final_step": global_step,
+        "best_model_location": best_checkpoint_path
+    })
 
 
 wandb.finish()
