@@ -56,8 +56,7 @@ hyperparameters = {
     "lr_scheduler_patience": 2 if eval_mode == "accuracy" else 1,
     "lr_scheduler_factor": 0.5,
     "early_stopping_patience": 5 if eval_mode == "accuracy" else 3,
-    "early_stopping_delta": 0.001 if eval_mode == "accuracy" else 0.0001,
-    "early_stopping_mode": "max" if eval_mode == "accuracy" else "min",
+    "improvement_delta": 0.001 if eval_mode == "accuracy" else 0.0001,
     "weight_decay": 0.01,  # Initialized to Phase 1, will be managed by phase logic
     "beta1": 0.9,          # Added: Beta1 for AdamW
     "beta2": 0.95,        # Added: Beta2 for AdamW
@@ -111,7 +110,6 @@ hyperparameters["checkpoint_dir"] = os.path.join(
     hyperparameters["base_checkpoint_dir"],
     f"{hyperparameters['run_name_prefix']}_{eval_mode}/"
 )
-hyperparameters["best_checkpoint_path_suffix"] = f"best_chkpoint_{hyperparameters['run_name_prefix']}_{eval_mode}/"
 
 
 # ------ Define useful functions and classes ------
@@ -413,69 +411,107 @@ def evaluate_model(model, data_dataloader):
 
 
 
-# --- Class for early stopping ---
-class EarlyStopping:
-    def __init__(self, patience=3, delta=0, checkpoint_path="./best_model", mode='min'):
-        self.patience = patience
-        self.delta = delta
-        self.counter = 0
-        self.early_stop = False
-        self.checkpoint_path = checkpoint_path
-        self.best_step = -1
-        self.mode = mode  # 'min' for loss, 'max' for accuracy
+# Global variables to store the best metric value and step for early stopping
+best_metric_value_global = None # Will be initialized based on mode
+best_step_global = -1
 
-        if self.mode == 'min':
-            self.best_metric_value = float('inf')
-        elif self.mode == 'max':
-            self.best_metric_value = float('-inf')
-        else:
-            raise ValueError(f"Invalid mode: {self.mode}. Choose 'min' or 'max'.")
+def initialize_global_best_metric(mode):
+    """Initializes the global best metric based on the mode."""
+    global best_metric_value_global
+    if mode == 'accuracy':
+        best_metric_value_global = float('-inf')
+    elif mode == 'loss':
+        best_metric_value_global = float('inf')
+    else:
+        raise ValueError(f"Invalid mode for global best metric: {mode}. Choose 'accuracy' or 'loss'.")
 
-    def save_checkpoint(self, model, step, epoch=None):
-        # Save model when eval metric improves
-        model.save_pretrained(self.checkpoint_path)
-        self.best_step = step
+def save_checkpoint_if_improved(current_metric_value, model, step, epoch, checkpoint_path, mode, delta):
+    """
+    Checks if the current metric is an improvement over the global best metric and saves a checkpoint.
+
+    Args:
+        current_metric_value (float): The metric value from the current evaluation.
+        model: The model to save.
+        step (int): The current global step.
+        epoch (int): The current epoch.
+        checkpoint_path (str): The path to save the checkpoint.
+        mode (str): 'min' or 'max', indicating if lower or higher is better.
+        delta (float): The minimum change to qualify as an improvement.
+
+    Returns:
+        bool: True if the metric improved and a checkpoint was saved, False otherwise.
+    """
+    global best_metric_value_global, best_step_global
+
+    if best_metric_value_global is None:
+        # This should ideally be called once before the training loop,
+        # but as a fallback if not.
+        initialize_global_best_metric(mode)
+
+    improved = False
+    if mode == 'loss':
+        if current_metric_value < best_metric_value_global - delta:
+            best_metric_value_global = current_metric_value
+            improved = True
+    elif mode == 'accuracy':
+        if current_metric_value > best_metric_value_global + delta:
+            best_metric_value_global = current_metric_value
+            improved = True
+    
+    if improved:
+        model.save_pretrained(checkpoint_path)
+        best_step_global = step  # Update global best step
         
-        # Save metadata with step information
         metadata = {
             "step": step,
             "epoch": epoch,
-            "best_step": self.best_step,
-            f"best_metric_value ({self.mode})": self.best_metric_value,
+            "best_step": best_step_global,
+            f"best_metric_value ({mode})": best_metric_value_global,
             "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
-        # Save metadata to a JSON file
-        with open(os.path.join(self.checkpoint_path, "checkpoint_metadata.json"), "w") as f:
+        with open(os.path.join(checkpoint_path, "checkpoint_metadata.json"), "w") as f:
             json.dump(metadata, f, indent=4)
             
-        # Log to wandb
-        wandb.log({"best_model_step": step, f"best_model_metric ({self.mode})": self.best_metric_value})
-        
-        print(f"Earlystop Model saved to {self.checkpoint_path} at step {self.best_step} (epoch {epoch}) with {self.mode} metric: {self.best_metric_value:.4f}")
+        wandb.log({"best_model_step": best_step_global, f"best_model_metric ({mode})": best_metric_value_global})
+        print(f"Checkpoint saved to {checkpoint_path} at step {best_step_global} (epoch {epoch}) with {mode} metric: {best_metric_value_global:.4f} (Global Best)")
+    return improved
 
-    def check(self, current_metric_value):
-        improved = False
-        if self.mode == 'min':
-            if current_metric_value < self.best_metric_value - self.delta:
-                self.best_metric_value = current_metric_value
-                self.counter = 0
-                improved = True
-            else:
-                self.counter += 1
-        elif self.mode == 'max':
-            if current_metric_value > self.best_metric_value + self.delta:
-                self.best_metric_value = current_metric_value
-                self.counter = 0
-                improved = True
-            else:
-                self.counter += 1
+# --- Class for early stopping ---
+class EarlyStopping:
+    def __init__(self, patience=3): # Delta, checkpoint_path, and mode are removed
+        self.patience = patience
+        self.counter = 0
+        self.patience_met = False
+
+    # save_checkpoint method is removed
+
+    def check(self, metric_improved_and_saved: bool):
+        """
+        Updates the counter based on whether an improvement led to a checkpoint save.
+        Sets patience_met flag if patience is exceeded.
+
+        Args:
+            metric_improved_and_saved (bool): True if save_checkpoint_if_improved saved a model.
+        """
+        if metric_improved_and_saved:
+            self.counter = 0
         else:
-            raise ValueError(f"Invalid mode: {self.mode}. Choose 'min' or 'max'.")
+            self.counter += 1
 
         if self.counter >= self.patience:
-            self.early_stop = True
-        
-        return improved
+            self.patience_met = True
+
+class LRReductionMonitor:
+    def __init__(self):
+        self.lr_reduction_count = 0
+    def compare_lr(self, old_lr, new_lr):
+        if new_lr < old_lr: # Compare with LR before stepping
+            print(f"Learning rate reduced from {old_lr} to {new_lr} at step {global_step} by ReduceLROnPlateau based on {eval_mode} metric: {evaluation_metric:.4f}")
+            self.lr_reduction_count += 1
+            wandb.log({"lr_reduction_count": self.lr_reduction_count, "step": global_step, "epoch": epoch + 1})
+        elif new_lr == old_lr:
+                print("Current scheduler is ReduceLROnPlateau and LR didn't change.")
+    
 
 # 1) pick ONE master seed for the whole run
 MASTER_SEED = hyperparameters["master_seed"]          # change this between experiments
@@ -680,8 +716,8 @@ elif model_type == "7B":
 model = get_peft_model(model, lora_config, adapter_name="adapter")
 
 # --- Define checkpoint path for saving the model-checkpoints ---
-best_checkpoint_path = hyperparameters["best_checkpoint_path_suffix"] # Using the suffix from hyperparameters
-checkpoint_path = os.path.join(hyperparameters["checkpoint_dir"], best_checkpoint_path)
+
+best_checkpoint_path = os.path.join(hyperparameters["checkpoint_dir"], "best_chkpoint")
 
 # --- Prepare Training Loop ---
 
@@ -849,9 +885,8 @@ wandb.config.update(
         "lr_scheduler_mode": hyperparameters["lr_scheduler_mode"],
         "lr_scheduler_patience": hyperparameters["lr_scheduler_patience"],
         "lr_scheduler_factor": hyperparameters["lr_scheduler_factor"],
-        "early_stopping_mode": hyperparameters["early_stopping_mode"],
         "early_stopping_patience": hyperparameters["early_stopping_patience"],
-        "early_stopping_delta": hyperparameters["early_stopping_delta"],
+        "improvement_delta": hyperparameters["improvement_delta"],
 
         "min_lr": hyperparameters["min_lr"],
         "max_lr_reductions": hyperparameters["max_lr_reductions"],
@@ -887,30 +922,33 @@ wandb.watch(model, log="all", log_freq=10)
 start_time = time.time()
 model.train()
 
+# Initialize global best metric before the training loop
+initialize_global_best_metric(eval_mode)
+
 # --- Enable/Disable early stopping ---
 early_stop_flag = hyperparameters["early_stop_flag"]
 if early_stop_flag:
+    # EarlyStopper now only needs patience.
+    # The other parameters (delta, checkpoint_path, mode) will be used directly
+    # by the save_checkpoint_if_improved function.
     early_stopper = EarlyStopping(
-        patience=hyperparameters["early_stopping_patience"],
-        delta=hyperparameters["early_stopping_delta"],
-        checkpoint_path=checkpoint_path,
-        mode=hyperparameters["early_stopping_mode"]
+        patience=hyperparameters["early_stopping_patience"]
     )
+    # The checkpoint_path for saving the best model is defined later and used directly.
 
 
 # --- Training Loop ---
 
 avg_train_loss = 0.0
-# eval_loss = 0.0 # Old
-# test_loss = 0.0 # Old
 eval_loss_real = 0.0
 eval_loss_sim = 0.0
 test_loss_real = 0.0
 test_loss_sim = 0.0
 global_step = 0  # Track total steps across all epochs
-lr_reduction_count = 0 # Initialize LR reduction counter
 applied_phase_idx = -1 # Initialize applied phase index
 steps_in_current_phase_for_eval_counter = 0 # Counter for phase-specific evaluation frequency
+
+stop_training = False
 
 last_eval_loss_real = last_sent_eval_acc_real = last_overall_eval_acc_real = last_eval_loss_sim = last_sent_eval_acc_sim = last_overall_eval_acc_sim = last_avg_eval_loss = last_avg_eval_acc = last_test_loss_real = last_sent_test_acc_real = last_overall_test_acc_real = last_test_loss_sim = last_sent_test_acc_sim = last_overall_test_acc_sim = last_avg_test_loss = last_avg_test_acc = 0.0 # initialize variables to store last known evaluation metrics, only for archival purposes. Global scope so can be used anywhere (mainly for logging)
 
@@ -976,6 +1014,7 @@ for epoch in range(max_epochs): # epochs loop
                         verbose=True,
                         min_lr=hyperparameters["min_lr"]
                     )
+                    lr_reduction_monitor = LRReductionMonitor()
                 elif new_scheduler_type == "CosineAnnealingWarmRestarts":
                     t_0_current_phase = hyperparameters["cosine_warm_restarts_t_0_phases"][current_phase_idx]
                     t_mult_current_phase = hyperparameters["cosine_warm_restarts_t_mult_phases"][current_phase_idx]
@@ -1099,6 +1138,8 @@ for epoch in range(max_epochs): # epochs loop
                 "current_lr": optimizer.param_groups[0]['lr'], # Log current learning rate
                 "step": global_step
             })
+
+
             if eval_mode == "loss":
                 evaluation_metric = avg_eval_loss
                 print(f"Using Average Eval Loss ({avg_eval_loss:.4f}) for LR scheduling and early stopping.")
@@ -1108,57 +1149,55 @@ for epoch in range(max_epochs): # epochs loop
             else:
                 # This check is also done when setting hyperparameters, but good for safety
                 raise ValueError(f"Invalid eval_mode: {eval_mode}. Please choose 'loss' or 'accuracy'.")
+            
+            metric_improved_and_checkpoint_saved = save_checkpoint_if_improved(
+                    current_metric_value=evaluation_metric,
+                    model=model,
+                    step=global_step,
+                    epoch=epoch + 1,
+                    checkpoint_path=best_checkpoint_path, # This is the existing path for best checkpoints
+                    mode=eval_mode,
+                    delta=hyperparameters["improvement_delta"]
+                ) # Save checkpoint if improvement is met, returns Improved: True or False
+            
+            if current_scheduler_type == "ReduceLROnPlateau" and scheduler is not None:
+                old_lr = optimizer.param_groups[0]['lr'] # Get LR before potential reduction by scheduler
+                scheduler.step(evaluation_metric) # Step the scheduler using the chosen evaluation_metric
+                new_lr = optimizer.param_groups[0]['lr'] # Get LR after potential reduction
 
+                lr_reduction_monitor.compare_lr(old_lr, new_lr)
+
+            
             # --- Learning Rate Scheduler and Early Stopping Logic ---
             if early_stop_flag:
-                old_lr = optimizer.param_groups[0]['lr'] # Get LR before potential reduction by scheduler
-
-                if current_scheduler_type == "ReduceLROnPlateau" and scheduler is not None:
-                    scheduler.step(evaluation_metric) # Step the scheduler using the chosen evaluation_metric
-                    new_lr = optimizer.param_groups[0]['lr'] # Get LR after potential reduction
-
-                    if new_lr < old_lr: # Compare with LR before stepping
-                        print(f"Learning rate reduced from {old_lr} to {new_lr} at step {global_step} by ReduceLROnPlateau based on {eval_mode} metric: {evaluation_metric:.4f}")
-                        lr_reduction_count += 1
-                        wandb.log({"lr_reduction_count": lr_reduction_count, "step": global_step, "epoch": epoch + 1})
-                elif scheduler is not None: # For CosineAnnealingWarmRestarts or StepLR, LR is already stepped per batch
-                    new_lr = optimizer.param_groups[0]['lr']
-                    if new_lr != old_lr: # Log if LR changed (it usually will for these schedulers)
-                         print(f"LR updated by {current_scheduler_type} to {new_lr} at step {global_step}.")
-                else: # No scheduler active or an issue
-                    new_lr = old_lr
-                    print("Warning: No active scheduler to step for ReduceLROnPlateau logic, or scheduler is None.")
-
-
+               
                 # Check early stopping using the chosen evaluation_metric
-                if early_stopper.check(evaluation_metric):
-                    early_stopper.save_checkpoint(model=model, step=global_step, epoch=epoch+1)
-                else:
-                    # Modified early stopping condition based on LR reductions
-                    if lr_reduction_count >= hyperparameters["max_lr_reductions"] and early_stopper.counter >= early_stopper.patience:
-                        print(f"Early stopping triggered: LR reduced {lr_reduction_count} times and {eval_mode} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations.")
-                        early_stopper.early_stop = True
-                        break 
-                    elif early_stopper.counter >= early_stopper.patience:
-                        print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations, but max LR reductions ({lr_reduction_count}/{hyperparameters['max_lr_reductions']}) not reached yet. Current LR: {new_lr}. Continuing.")
-                        # No break here, just a notification. The original early_stopper.early_stop will be True if patience is met.
-                        if early_stopper.early_stop: # This condition is from the original EarlyStopping class
-                           print(f"{eval_mode.capitalize()} metric stagnation exceeded patience at step {global_step}, early stopping activated")
-                           break
+                # The save_checkpoint_if_improved function now handles the logic of comparing with best_metric_value_global
+                # and saving if improvement is met according to hyperparameters["early_stopping_delta"]
             
-            """list of variables:
-            eval_loss_real, sent_eval_acc_real, overall_eval_acc_real,
-            eval_loss_sim, sent_eval_acc_sim, overall_eval_acc_sim,
-            avg_eval_loss, avg_eval_acc,
-            test_loss_real, sent_test_acc_real, overall_test_acc_real,
-            test_loss_sim, sent_test_acc_sim, overall_test_acc_sim,
-            avg_test_loss, avg_test_acc
-            """
+                early_stopper.check(metric_improved_and_checkpoint_saved) # reset internal counter if improved is true, otherwise increase by 1. If patience is met, set patience_met to True
+
+                # Modified early stopping condition based on LR reductions and patience
+                if early_stopper.patience_met:
+                    if current_scheduler_type == "ReduceLROnPlateau" and scheduler is not None:
+                        if lr_reduction_monitor.lr_reduction_count >= hyperparameters["max_lr_reductions"]:
+                            print(f"Early stopping triggered: LR reduced {lr_reduction_monitor.lr_reduction_count}/{hyperparameters['max_lr_reductions']} times and {eval_mode} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met). Early stopping.")
+                            stop_training = True
+                            break
+                        else:
+                            print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met), but max LR reductions ({lr_reduction_monitor.lr_reduction_count}/{hyperparameters['max_lr_reductions']}) not reached yet. Current LR: {new_lr}. Continuing training.")
+                            stop_training = False # redudant set to False, but good for clarity and safety
+                    else:
+                        new_lr = optimizer.param_groups[0]['lr']
+                        print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met), scheduler is {current_scheduler_type}. Early stopping.")
+                        stop_training = True
+                        break
+            
             last_eval_loss_real, last_sent_eval_acc_real, last_overall_eval_acc_real, last_eval_loss_sim, last_sent_eval_acc_sim, last_overall_eval_acc_sim, last_avg_eval_loss, last_test_loss_real, last_sent_test_acc_real, last_overall_test_acc_real, last_test_loss_sim, last_sent_test_acc_sim, last_overall_test_acc_sim, last_avg_test_loss, last_avg_test_acc = eval_loss_real, sent_eval_acc_real, overall_eval_acc_real, eval_loss_sim, sent_eval_acc_sim, overall_eval_acc_sim, avg_eval_loss, test_loss_real, sent_test_acc_real, overall_test_acc_real, test_loss_sim, sent_test_acc_sim, overall_test_acc_sim, avg_test_loss, avg_test_acc # update last known evaluation metrics, could have created a list for this and changes them via the list but whatever
 
 
     # If early stopping was triggered, break out of the epoch loop too
-    if early_stop_flag and early_stopper.early_stop:
+    if early_stop_flag and stop_training:
         break
 
     epoch_time = time.time() - start_time
