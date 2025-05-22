@@ -28,30 +28,30 @@ eval_mode = "accuracy" # "loss" or "accuracy"
 
 # ------ Configuration & Hyperparameters ------
 
-phase_2_start = 4000
-phase_3_start = 5000
+phase_2_start = 2000
+phase_3_start = 4000
 
 hyperparameters = {
 
     "base_checkpoint_dir": "./", # Base directory for checkpoints
-    "run_name_prefix": "1.3b_test_option-A", # Prefix for run names and checkpoint subdirs
-    "eval_every_n_steps": 5,
+    "run_name_prefix": "1.3b_Option-A-first-run-v3", # Prefix for run names and checkpoint subdirs
+    "eval_every_n_steps": 500, # Will be overridden by phase-specific settings
     "master_seed": 42,
     "num_workers_dataloader": 4,
     "lora_rank": 6,
     "lora_alpha": 12,
     "lora_dropout": 0.05, # Consider changing between 1.3B and 7B models
-    "batch_size": 1,
+    "batch_size": 6,
     "max_epochs": 30,
     "min_lr": 1e-6,
     "max_lr_reductions": 4,
     "early_stopping_enabled_globally": True, # New: Master switch for dynamic early stopping
     "early_stopping_active_ranges": [[phase_2_start, 20000]], # New: List of [start_step, end_step] ranges for active early stopping. Example: [[0, 2000], [4000, 6000]]
-    # "keyword_weight": 1.5,
-    # "background_weight": 1.0,
+    # "keyword_weight": 1.5, # Will be overridden by phase-specific settings
+    # "background_weight": 1.0, # Will be overridden by phase-specific settings
     "wandb_project_name": "deepseek-vl-training_final_version",
     "real_image_eval_weight": 1.0,
-    "sim_image_eval_weight": 0.5,
+    "sim_image_eval_weight": 0.75,
 
     # Mode-dependent parameters using inline conditionals
     "lr_scheduler_mode": "max" if eval_mode == "accuracy" else "min",
@@ -59,49 +59,49 @@ hyperparameters = {
     "lr_scheduler_factor": 0.5,
     "early_stopping_patience": 5 if eval_mode == "accuracy" else 3,
 
-    "improvement_delta": 0.001 if eval_mode == "accuracy" else 0.0001,
+    "improvement_delta": 0.0001 if eval_mode == "accuracy" else 0.0001,
     "weight_decay": 0.01,  # Initialized to Phase 1, will be managed by phase logic
     "beta1": 0.9,          # Added: Beta1 for AdamW
     "beta2": 0.95,        # Added: Beta2 for AdamW
     "grad_clip_norm": 1.0, # Initialized to Phase 1, will be managed by phase logic
 
     # Phase-specific hyperparameters
-    "learning_rate_phases": [2e-4, 3e-5, 2e-5], # LR for Phase 1, Phase 2, Phase 3
-    "weight_decay_phases": [0.0, 0.0, 0.0], # WD for Phase 1, Phase 2, Phase 3
-    "grad_clip_norm_phases": [1.0, 1.0, 1.0],   # Grad Clip for Phase 1, Phase 2, Phase 3
-    "phase_boundaries": [phase_2_start, phase_3_start], # global_step counts where phases change
+    "learning_rate_phases": [2e-4, 1e-4, 5e-5], # LR for Main Phase 1, Main Phase 2, Main Phase 3
+    "weight_decay_phases": [0.0, 0.0, 0.0], # WD for Main Phase 1, Main Phase 2, Main Phase 3 (and their warmups)
+    "grad_clip_norm_phases": [1.0, 1.0, 1.0],   # Grad Clip for Main Phase 1, Main Phase 2, Main Phase 3 (and their warmups)
+    "phase_boundaries": [phase_2_start, phase_3_start], # conceptual_global_step counts where main phases *would* change if no warmups
 
-    # --- Phase-specific Learning Rate Scheduler Hyperparameters ---
-    "lr_scheduler_types_phases": ["CosineAnnealingWarmRestarts", "CosineAnnealingWarmRestarts", "ReduceLROnPlateau"], # Scheduler type for each phase
+    # --- Warmup Phase Hyperparameters ---
+    "warmup_steps_phases": [100, 100, 100], # Number of warmup steps for WU1, WU2, WU3 respectively
 
-    # Parameters for CosineAnnealingWarmRestarts (used if "CosineAnnealingWarmRestarts" is selected for a phase)
-    # T_0: Number of iterations for the first restart.
-    # T_mult: A factor increases T_i after a restart. T_i = T_i * T_mult.
-    # User needs to set these carefully based on phase length and desired restart behavior.
-    # Example: If a phase has 5000 steps, T_0=1000, T_mult=1 means 5 restarts. T_0=1000, T_mult=2 means restarts at 1000, 1000+2000=3000.
-    "cosine_warm_restarts_t_0_phases": [1000, 1000, 1000], # Example T_0 values for each phase
-    "cosine_warm_restarts_t_mult_phases": [1, 1, 1],      # Example T_mult values for each phase
+    # --- Phase-specific Learning Rate Scheduler Hyperparameters (for Main Phases) ---
+    "lr_scheduler_types_phases": ["CosineAnnealingWarmRestarts", "CosineAnnealingWarmRestarts", "ReduceLROnPlateau"], # Scheduler type for each main phase
 
-    # Parameters for StepLR (used if "StepLR" is selected for a phase)
-    "step_lr_step_size_phases": [200, 200, 100], # step_size for StepLR for each phase
-    "step_lr_gamma_phases": [0.7, 0.5, 0.5],       # gamma for StepLR for each phase
+    # Parameters for CosineAnnealingWarmRestarts (used if "CosineAnnealingWarmRestarts" is selected for a main phase)
+    "cosine_warm_restarts_t_0_phases": [1000, 1000, 1000], # Example T_0 values for each main phase
+    "cosine_warm_restarts_t_mult_phases": [1, 1, 1],      # Example T_mult values for each main phase
 
-    # --- Phase-specific Token Weights and Eval Frequency ---
-    "keyword_weight_phases": [1.0, 1.5, 1.5],       # Keyword token weight for each phase
-    "background_weight_phases": [1.0, 1, 0.5],    # Background token weight for each phase
-    "eval_every_n_steps_phases": [500, 200, 100],   # Evaluation frequency for each phase
+    # Parameters for StepLR (used if "StepLR" is selected for a main phase)
+    "step_lr_step_size_phases": [200, 200, 100], # step_size for StepLR for each main phase
+    "step_lr_gamma_phases": [0.7, 0.5, 0.5],       # gamma for StepLR for each main phase
+
+    # --- Phase-specific Token Weights and Eval Frequency (for Main Phases and their Warmups) ---
+    "keyword_weight_phases": [1.0, 1.5, 1.5],       # Keyword token weight for each phase (applies to WU and Main)
+    "background_weight_phases": [1.0, 1.0, 0.5],    # Background token weight for each phase (applies to WU and Main)
+    "eval_every_n_steps_phases": [500, 200, 100],   # Evaluation frequency for each main phase (evaluation skipped in WU)
 
     # Note: "lr_scheduler_patience", "lr_scheduler_factor", "lr_scheduler_mode", "min_lr",
     # "max_lr_reductions" are still in hyperparameters.
-    # "min_lr" is used by ReduceLROnPlateau and CosineAnnealingWarmRestarts.
+    # "min_lr" is used by ReduceLROnPlateau, CosineAnnealingWarmRestarts, and Warmup.
     # The others are primarily for ReduceLROnPlateau.
 }
 
 # Initialize with Phase 1 values for optimizer and initial clipping
-hyperparameters["learning_rate"] = hyperparameters["learning_rate_phases"][0]
+# LR will be min_lr if WU1 has steps, otherwise P1's LR.
+hyperparameters["learning_rate"] = hyperparameters["min_lr"] if hyperparameters["warmup_steps_phases"][0] > 0 else hyperparameters["learning_rate_phases"][0]
 hyperparameters["weight_decay"] = hyperparameters["weight_decay_phases"][0]
 hyperparameters["grad_clip_norm"] = hyperparameters["grad_clip_norm_phases"][0]
-# Initialize phase-dependent token weights and eval frequency
+# Initialize phase-dependent token weights and eval frequency (for WU1/P1)
 hyperparameters["keyword_weight"] = hyperparameters["keyword_weight_phases"][0]
 hyperparameters["background_weight"] = hyperparameters["background_weight_phases"][0]
 hyperparameters["eval_every_n_steps"] = hyperparameters["eval_every_n_steps_phases"][0]
@@ -164,6 +164,7 @@ def log_memory_cluster(prefix=""):
     #free_memory = reserved_memory - allocated_memory  # Free memory in reserved space
     # allocated = torch.cuda.memory_allocated() / (1024**2)  # In MB
     # reserved = torch.cuda.memory_reserved() / (1024**2)    # In MB
+    print(prefix)
     print(f"{prefix} GPU Memory - Total: {total_memory:.2f} MB | Allocated: {allocated_memory:.2f} MB | Reserved: {reserved_memory:.2f} MB") #| Free: {free_memory:.2f} MB
 
 def log_memory_flex(cluster_flag=False, message="GPU Memory:", gpu_id=0, device_name="GPU"):
@@ -296,10 +297,47 @@ def custom_forward(batch, model):
 
     del batch["pixel_values"]
     labels = batch["input_ids"].clone()
-    # For each sequence in the batch, mask out the first 1014 tokens
-    labels[:, 0:1014] = -100
+    # --- Dynamic masking based on "Assistant:" ---
+    # Tokenizer should be in the global scope or passed to this function
+    # Assuming `tokenizer` is the global VLChatProcessor's tokenizer
+    assistant_phrase = "Assistant:"
+    # Encode the phrase to get token IDs, without adding special BOS/EOS tokens for the phrase itself
+    assistant_token_ids = tokenizer.encode(assistant_phrase, add_special_tokens=False)
+    assistant_token_ids_tensor = torch.tensor(assistant_token_ids, device=model.device, dtype=torch.long)
+    
+    L_assistant = len(assistant_token_ids)
+    current_input_ids = batch["input_ids"] # These are already on model.device
+
+    for i in range(current_input_ids.shape[0]): # Iterate over batch samples
+        sample_input_ids = current_input_ids[i] # Current sample's input_ids
+        found_match_for_sample = False
+        # Search for the "Assistant:" token sequence in the current sample
+        for k_start_index in range(sample_input_ids.size(0) - L_assistant + 1):
+            window = sample_input_ids[k_start_index : k_start_index + L_assistant]
+            if torch.equal(window, assistant_token_ids_tensor):
+                # Found "Assistant:". Mask labels up to the end of this phrase.
+                # The first token of the actual model output starts *after* "Assistant:".
+                # So, indices from 0 to (k_start_index + L_assistant - 1) are masked.
+                mask_end_exclusive_index = k_start_index + L_assistant
+                labels[i, :mask_end_exclusive_index] = -100
+                found_match_for_sample = True
+                break # Stop search for this sample once "Assistant:" is found
+        
+        if not found_match_for_sample:
+            # This case should ideally not be hit if "Assistant:" is always present
+            # and unique as per the problem description.
+            print(f"WARNING: The 'Assistant:' phrase (tokens: {assistant_token_ids}) was not found in sample {i} of the batch. "
+                  f"Input IDs for sample: {sample_input_ids.tolist()}. "
+                  f"Applying a fallback mask (first 1014 tokens or sequence length) for this sample.")
+            # Fallback to a default masking length, ensuring it doesn't exceed sequence length
+            effective_mask_len = min(1014, sample_input_ids.size(0))
+            labels[i, :effective_mask_len] = -100
+            
+    # Original masking for padding tokens (tokens where attention_mask is 0)
+    # This should be applied after the prompt masking.
     labels = labels.masked_fill(batch["attention_mask"] == 0, -100)
-    #batch["labels"] = labels
+    #batch["labels"] = labels # Not strictly necessary to add to batch if labels is used directly
+
 
     # Forward pass through language model
     outputs = model.language_model(
@@ -539,13 +577,38 @@ def worker_init_fn(worker_id):
     worker_seed = MASTER_SEED + worker_id
     np.random.seed(worker_seed)
     random.seed(worker_seed)
+
+# ------ Calculate actual segment start steps ------
+# These define the global_step at which each segment (Warmup or Main Phase) begins.
+segment_start_steps = {}
+conceptual_pb = hyperparameters["phase_boundaries"]
+warmup_steps = hyperparameters["warmup_steps_phases"]
+
+segment_start_steps["WU1"] = 0
+segment_start_steps["P1"] = segment_start_steps["WU1"] + warmup_steps[0]
+
+segment_start_steps["WU2"] = conceptual_pb[0] + warmup_steps[0]
+segment_start_steps["P2"] = segment_start_steps["WU2"] + warmup_steps[1]
+
+segment_start_steps["WU3"] = conceptual_pb[1] + warmup_steps[0] + warmup_steps[1]
+segment_start_steps["P3"] = segment_start_steps["WU3"] + warmup_steps[2]
+
+# For convenience, create a sorted list of segment names and their start steps
+# This helps in determining the current segment in the training loop.
+sorted_segment_transitions = sorted(segment_start_steps.items(), key=lambda item: item[1])
+# Example: [('WU1', 0), ('P1', 100), ('WU2', 4100), ('P2', 4250), ('WU3', 5250), ('P3', 5300)]
+
+print("Calculated Segment Start Steps:")
+for name, step_val in sorted_segment_transitions:
+    print(f"  {name}: {step_val}")
+
 # ------ Load/initialize objects ------
 
 # --- Initialize wandb ---
 run = wandb.init(
     project=hyperparameters["wandb_project_name"],  # name of your project in wandb
     name=hyperparameters["wandb_run_name"], # Constructing a more dynamic run name
-    mode="disabled"
+    mode="online"
 )
 
 # --- Load environment variables ---
@@ -859,17 +922,18 @@ min_lr = hyperparameters["min_lr"]
 scheduler_mode = hyperparameters["lr_scheduler_mode"]
 
 #optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4) # torch optimizer
-lr_rate = hyperparameters["learning_rate"] # Initial LR (Phase 1)
+# Initial LR for optimizer: min_lr if WU1 has steps, else P1's LR.
+initial_optimizer_lr = hyperparameters["min_lr"] if hyperparameters["warmup_steps_phases"][0] > 0 else hyperparameters["learning_rate_phases"][0]
 optimizer = bnb.optim.AdamW(
     model.parameters(),
-    lr=lr_rate,
+    lr=initial_optimizer_lr, # Set initial LR
     betas=(hyperparameters["beta1"], hyperparameters["beta2"]),
-    weight_decay=hyperparameters["weight_decay"] # Initial WD (Phase 1)
+    weight_decay=hyperparameters["weight_decay_phases"][0] # Initial WD (WU1/P1)
 ) # paged optimizer
 
 # --- Initialize Learning Rate Scheduler ---
-scheduler = None # Will be initialized dynamically based on phase
-current_scheduler_type = None # To track the current scheduler type
+scheduler = None # Will be initialized dynamically based on main phase
+current_scheduler_type = None # To track the current scheduler type (or "Warmup")
 
 wandb.config.update(
     {
@@ -896,7 +960,6 @@ wandb.config.update(
         "master_seed": hyperparameters["master_seed"],
         "keyword_weight": hyperparameters["keyword_weight"],
         "background_weight": hyperparameters["background_weight"],
-        "eval_every_n_steps": hyperparameters["eval_every_n_steps"],
         "initial_weight_decay": hyperparameters["weight_decay"], # Log initial WD
         "beta1": hyperparameters["beta1"],
         "beta2": hyperparameters["beta2"],
@@ -904,7 +967,8 @@ wandb.config.update(
         "learning_rate_phases": hyperparameters["learning_rate_phases"], # Log phase LRs
         "weight_decay_phases": hyperparameters["weight_decay_phases"],   # Log phase WDs
         "grad_clip_norm_phases": hyperparameters["grad_clip_norm_phases"], # Log phase GCNs
-        "phase_boundaries": hyperparameters["phase_boundaries"],          # Log phase boundaries
+        "phase_boundaries": hyperparameters["phase_boundaries"],          # Log conceptual phase boundaries
+        "warmup_steps_phases": hyperparameters["warmup_steps_phases"], # Log warmup steps
 
         # Log new scheduler hyperparameters
         "lr_scheduler_types_phases": hyperparameters["lr_scheduler_types_phases"],
@@ -926,7 +990,7 @@ wandb.config.update(
     }
     )
 
-wandb.watch(model, log="all", log_freq=10)
+wandb.watch(model, log="all", log_freq=5)
 
 start_time = time.time()
 model.train()
@@ -946,7 +1010,13 @@ eval_loss_sim = 0.0
 test_loss_real = 0.0
 test_loss_sim = 0.0
 global_step = 0  # Track total steps across all epochs
-applied_phase_idx = -1 # Initialize applied phase index
+# applied_phase_idx = -1 # Initialize applied phase index # Replaced
+applied_segment_details = { # To track the currently applied segment and its properties
+    "name": None, # e.g., "WU1", "P1", "WU2", etc.
+    "main_phase_idx": -1, # 0, 1, or 2 corresponding to P1, P2, P3
+    "is_warmup": False,
+    "start_step": -1
+}
 steps_in_current_phase_for_eval_counter = 0 # Counter for phase-specific evaluation frequency
 
 stop_training = False
@@ -960,88 +1030,152 @@ for epoch in range(max_epochs): # epochs loop
     
     for batch_idx, batch in enumerate(train_dataloader): # batches loop
 
-        # --- Phase Management ---
-        current_phase_idx = 0
-        if global_step >= hyperparameters["phase_boundaries"][1]: # Phase 3
-            current_phase_idx = 2
-        elif global_step >= hyperparameters["phase_boundaries"][0]: # Phase 2
-            current_phase_idx = 1
-        # Else: Phase 1 (current_phase_idx remains 0)
+        # --- Segment Management (Warmup / Main Phase) ---
+        current_segment_name = None
+        current_main_phase_idx = -1
+        current_segment_is_warmup = False
+        current_segment_start_step = -1
 
-        if current_phase_idx != applied_phase_idx:
-            new_lr = hyperparameters["learning_rate_phases"][current_phase_idx]
-            new_wd = hyperparameters["weight_decay_phases"][current_phase_idx]
-            new_gcn = hyperparameters["grad_clip_norm_phases"][current_phase_idx]
-            new_scheduler_type = hyperparameters["lr_scheduler_types_phases"][current_phase_idx]
-            new_keyword_weight = hyperparameters["keyword_weight_phases"][current_phase_idx]
-            new_background_weight = hyperparameters["background_weight_phases"][current_phase_idx]
-            new_eval_every_n_steps = hyperparameters["eval_every_n_steps_phases"][current_phase_idx]
+        # Determine current segment based on global_step
+        for i in range(len(sorted_segment_transitions)):
+            name, start_step_val = sorted_segment_transitions[i]
+            next_start_step_val = float('inf')
+            if i + 1 < len(sorted_segment_transitions):
+                next_start_step_val = sorted_segment_transitions[i+1][1]
+            
+            if start_step_val <= global_step < next_start_step_val:
+                current_segment_name = name
+                current_segment_start_step = start_step_val
+                if "WU" in name:
+                    current_segment_is_warmup = True
+                    current_main_phase_idx = int(name[2:]) - 1 # WU1 -> 0, WU2 -> 1, WU3 -> 2
+                else: # P1, P2, P3
+                    current_segment_is_warmup = False
+                    current_main_phase_idx = int(name[1:]) - 1 # P1 -> 0, P2 -> 1, P3 -> 2
+                break
+        
+        if current_segment_name is None: # Should not happen if logic is correct
+            raise RuntimeError(f"Could not determine current segment for global_step {global_step}")
 
-            optimizer.param_groups[0]['lr'] = new_lr
+        # Check if segment has changed
+        if current_segment_name != applied_segment_details["name"]:
+            print(f"\nGlobal Step {global_step}: Transitioning to Segment: {current_segment_name} (Main Phase Index: {current_main_phase_idx}, Warmup: {current_segment_is_warmup})")
+            
+            # Update common hyperparameters based on the current_main_phase_idx
+            # These apply to both warmup and its subsequent main phase
+            new_wd = hyperparameters["weight_decay_phases"][current_main_phase_idx]
+            new_gcn = hyperparameters["grad_clip_norm_phases"][current_main_phase_idx]
+            new_keyword_weight = hyperparameters["keyword_weight_phases"][current_main_phase_idx]
+            new_background_weight = hyperparameters["background_weight_phases"][current_main_phase_idx]
+            new_eval_every_n_steps = hyperparameters["eval_every_n_steps_phases"][current_main_phase_idx]
+
             optimizer.param_groups[0]['weight_decay'] = new_wd
-            hyperparameters["grad_clip_norm"] = new_gcn # Update for clipping logic
-            hyperparameters["keyword_weight"] = new_keyword_weight # Update for loss calculation
-            hyperparameters["background_weight"] = new_background_weight # Update for loss calculation
-            hyperparameters["eval_every_n_steps"] = new_eval_every_n_steps # Update for eval frequency
+            hyperparameters["grad_clip_norm"] = new_gcn
+            hyperparameters["keyword_weight"] = new_keyword_weight
+            hyperparameters["background_weight"] = new_background_weight
+            hyperparameters["eval_every_n_steps"] = new_eval_every_n_steps # Eval only happens in main phase
 
-            steps_in_current_phase_for_eval_counter = 0 # Reset eval counter for the new phase
-
-            print(f"Global Step {global_step}: Entered Phase {current_phase_idx + 1}. "
-                  f"LR: {new_lr}, WD: {new_wd}, Grad Clip: {new_gcn}, Scheduler: {new_scheduler_type}, "
-                  f"Keyword Weight: {new_keyword_weight}, Background Weight: {new_background_weight}, "
-                  f"Eval Every: {new_eval_every_n_steps} steps")
-            wandb.log({
-                "current_phase": current_phase_idx + 1,
-                "phase_learning_rate": new_lr,
-                "phase_weight_decay": new_wd,
-                "phase_grad_clip_norm": new_gcn,
-                "phase_scheduler_type": new_scheduler_type,
-                "phase_keyword_weight": new_keyword_weight,
-                "phase_background_weight": new_background_weight,
-                "phase_eval_every_n_steps": new_eval_every_n_steps,
+            log_payload = {
+                "current_segment": current_segment_name,
+                "current_main_phase_idx": current_main_phase_idx + 1, # 1-indexed for logging
+                "is_warmup_segment": 1 if current_segment_is_warmup else 0,
+                "segment_weight_decay": new_wd,
+                "segment_grad_clip_norm": new_gcn,
+                "segment_keyword_weight": new_keyword_weight,
+                "segment_background_weight": new_background_weight,
+                "segment_eval_every_n_steps": new_eval_every_n_steps,
                 "step": global_step,
                 "epoch": epoch + 1
-            })
+            }
+
+            if current_segment_is_warmup:
+                scheduler = None # No scheduler during warmup
+                current_scheduler_type = "WarmupLinear" # Indicate manual LR control
+                # LR is set per step during warmup
+                print(f"  Segment Type: Warmup. LR will ramp from {hyperparameters['min_lr']} to {hyperparameters['learning_rate_phases'][current_main_phase_idx]}.")
+                print(f"  WD: {new_wd}, Grad Clip: {new_gcn}, Keyword W: {new_keyword_weight}, BG W: {new_background_weight}")
+                log_payload["segment_scheduler_type"] = current_scheduler_type
+            else: # Main Phase
+                new_lr = hyperparameters["learning_rate_phases"][current_main_phase_idx]
+                new_scheduler_type_for_main_phase = hyperparameters["lr_scheduler_types_phases"][current_main_phase_idx]
+                
+                optimizer.param_groups[0]['lr'] = new_lr # Set LR for the main phase
+                steps_in_current_phase_for_eval_counter = 0 # Reset eval counter for the new main phase
+                
+                print(f"  Segment Type: Main Phase. LR: {new_lr}, Scheduler: {new_scheduler_type_for_main_phase}")
+                print(f"  WD: {new_wd}, Grad Clip: {new_gcn}, Keyword W: {new_keyword_weight}, BG W: {new_background_weight}, Eval Every: {new_eval_every_n_steps} steps")
+                log_payload["segment_learning_rate"] = new_lr
+                log_payload["segment_scheduler_type"] = new_scheduler_type_for_main_phase
+
+                # Initialize or Re-initialize Scheduler for the new main phase
+                if new_scheduler_type_for_main_phase != current_scheduler_type or scheduler is None:
+                    print(f"  Initializing scheduler for Main Phase {current_main_phase_idx + 1}: {new_scheduler_type_for_main_phase}")
+                    
+                    # Reset initial_lr in optimizer's param groups to ensure the new scheduler
+                    # picks up the current LR as its base_lr, not a stale one from a previous phase.
+                    for group in optimizer.param_groups:
+                        if 'initial_lr' in group:
+                            del group['initial_lr']
+                    
+                    if new_scheduler_type_for_main_phase == "ReduceLROnPlateau":
+                        scheduler = ReduceLROnPlateau(
+                            optimizer,
+                            mode=hyperparameters["lr_scheduler_mode"],
+                            factor=hyperparameters["lr_scheduler_factor"],
+                            patience=hyperparameters["lr_scheduler_patience"],
+                            verbose=True,
+                            min_lr=hyperparameters["min_lr"]
+                        )
+                        lr_reduction_monitor = LRReductionMonitor()
+                    elif new_scheduler_type_for_main_phase == "CosineAnnealingWarmRestarts":
+                        t_0_current_phase = hyperparameters["cosine_warm_restarts_t_0_phases"][current_main_phase_idx]
+                        t_mult_current_phase = hyperparameters["cosine_warm_restarts_t_mult_phases"][current_main_phase_idx]
+                        scheduler = CosineAnnealingWarmRestarts(
+                            optimizer,
+                            T_0=t_0_current_phase,
+                            T_mult=t_mult_current_phase,
+                            eta_min=hyperparameters["min_lr"],
+                            verbose=True,
+                            last_epoch=-1 # Important for re-initialization
+                        )
+                    elif new_scheduler_type_for_main_phase == "StepLR":
+                        step_size_current_phase = hyperparameters["step_lr_step_size_phases"][current_main_phase_idx]
+                        gamma_current_phase = hyperparameters["step_lr_gamma_phases"][current_main_phase_idx]
+                        scheduler = StepLR(
+                            optimizer,
+                            step_size=step_size_current_phase,
+                            gamma=gamma_current_phase,
+                            verbose=True
+                        )
+                    else:
+                        raise ValueError(f"Unsupported scheduler type: {new_scheduler_type_for_main_phase} for main phase {current_main_phase_idx + 1}")
+                    current_scheduler_type = new_scheduler_type_for_main_phase
             
-            # --- Initialize or Re-initialize Scheduler for the new phase ---
-            if new_scheduler_type != current_scheduler_type or scheduler is None:
-                print(f"Initializing scheduler for Phase {current_phase_idx + 1}: {new_scheduler_type}")
-                if new_scheduler_type == "ReduceLROnPlateau":
-                    scheduler = ReduceLROnPlateau(
-                        optimizer,
-                        mode=hyperparameters["lr_scheduler_mode"],
-                        factor=hyperparameters["lr_scheduler_factor"],
-                        patience=hyperparameters["lr_scheduler_patience"],
-                        verbose=True,
-                        min_lr=hyperparameters["min_lr"]
-                    )
-                    lr_reduction_monitor = LRReductionMonitor()
-                elif new_scheduler_type == "CosineAnnealingWarmRestarts":
-                    t_0_current_phase = hyperparameters["cosine_warm_restarts_t_0_phases"][current_phase_idx]
-                    t_mult_current_phase = hyperparameters["cosine_warm_restarts_t_mult_phases"][current_phase_idx]
-                    scheduler = CosineAnnealingWarmRestarts(
-                        optimizer,
-                        T_0=t_0_current_phase,
-                        T_mult=t_mult_current_phase,
-                        eta_min=hyperparameters["min_lr"],
-                        verbose=True,
-                        last_epoch=-1
-                    )
-                elif new_scheduler_type == "StepLR":
-                    step_size_current_phase = hyperparameters["step_lr_step_size_phases"][current_phase_idx]
-                    gamma_current_phase = hyperparameters["step_lr_gamma_phases"][current_phase_idx]
-                    scheduler = StepLR(
-                        optimizer,
-                        step_size=step_size_current_phase,
-                        gamma=gamma_current_phase,
-                        verbose=True
-                    )
-                else:
-                    raise ValueError(f"Unsupported scheduler type: {new_scheduler_type} for phase {current_phase_idx + 1}")
-                current_scheduler_type = new_scheduler_type
+            wandb.log(log_payload)
             
-            applied_phase_idx = current_phase_idx
-        # --- End Phase Management ---
+            applied_segment_details = {
+                "name": current_segment_name,
+                "main_phase_idx": current_main_phase_idx,
+                "is_warmup": current_segment_is_warmup,
+                "start_step": current_segment_start_step
+            }
+        # --- End Segment Management ---
+
+        # --- Learning Rate Adjustment for Warmup Segments ---
+        if applied_segment_details["is_warmup"]:
+            steps_into_warmup = global_step - applied_segment_details["start_step"]
+            total_warmup_steps_for_segment = hyperparameters["warmup_steps_phases"][applied_segment_details["main_phase_idx"]]
+            target_lr_main_phase = hyperparameters["learning_rate_phases"][applied_segment_details["main_phase_idx"]]
+            min_lr_val = hyperparameters["min_lr"]
+
+            if total_warmup_steps_for_segment > 0:
+                # Linear ramp-up: current_lr = start_lr + (end_lr - start_lr) * (current_step / total_steps)
+                # Add 1 to steps_into_warmup because it's 0-indexed for the first step of warmup
+                warmup_lr = min_lr_val + (target_lr_main_phase - min_lr_val) * ( (steps_into_warmup +1) / total_warmup_steps_for_segment)
+                optimizer.param_groups[0]['lr'] = warmup_lr
+            elif total_warmup_steps_for_segment == 0: # Handle 0 warmup steps (direct jump to target LR)
+                 optimizer.param_groups[0]['lr'] = target_lr_main_phase
+
 
         outputs, current_batch_size, labels = custom_forward(batch, model)
         logits  = outputs.logits 
@@ -1059,8 +1193,10 @@ for epoch in range(max_epochs): # epochs loop
         optimizer.step()
         optimizer.zero_grad()
 
-        # --- Step LR Schedulers that are not ReduceLROnPlateau ---
-        if current_scheduler_type in ["CosineAnnealingWarmRestarts", "StepLR"] and scheduler is not None:
+        # --- Step LR Schedulers (only if in Main Phase and scheduler is active) ---
+        if not applied_segment_details["is_warmup"] and \
+           current_scheduler_type in ["CosineAnnealingWarmRestarts", "StepLR"] and \
+           scheduler is not None:
             scheduler.step()
 
         log_memory_flex("After parameters update:",gpu_id=gpu_id, device_name=device_name)
@@ -1068,16 +1204,19 @@ for epoch in range(max_epochs): # epochs loop
         #total_epoch_train_loss += loss.item()*current_batch_size # loss.item() returns singular value of loss, also bring it back to CPU so can be mulitplied with current_batch_size
         total_samples += current_batch_size
         num_batches += 1
-        global_step += 1
-        steps_in_current_phase_for_eval_counter += 1
+        
+        steps_in_current_phase_for_eval_counter += 1 # Increments always
 
-        # Log current batch loss
-        print(f"Epoch {epoch+1}/{max_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Step {global_step}, Loss: {loss.item():.4f}")
+        # Log current batch loss and LR
+        current_actual_lr = optimizer.param_groups[0]['lr']
+        print(f"Epoch {epoch+1}/{max_epochs}, Batch {batch_idx+1}/{len(train_dataloader)}, Step {global_step} (Seg: {applied_segment_details['name']}), LR: {current_actual_lr:.2e}, Loss: {loss.item():.4f}")
 
         wandb.log({
             "train_loss": loss.item(),
+            "learning_rate_actual": current_actual_lr,
             "epoch": epoch + 1,
-            "step": global_step
+            "step": global_step,
+            "segment_name": applied_segment_details["name"]
         })
 
         del batch
@@ -1085,20 +1224,18 @@ for epoch in range(max_epochs): # epochs loop
         del loss
         torch.cuda.empty_cache()
         
-        # Evaluate model every eval_every_n_steps (phase specific)
-        if steps_in_current_phase_for_eval_counter % hyperparameters["eval_every_n_steps"] == 0:
-            # Calculate average training loss for reporting
-            #current_avg_train_loss = total_epoch_train_loss / total_samples if total_samples > 0 else 0
-            #, Avg Train Loss: {current_avg_train_loss:.4f}
+        # Evaluate model (only if in a Main Phase and at eval frequency)
+        if not applied_segment_details["is_warmup"] and \
+           steps_in_current_phase_for_eval_counter % hyperparameters["eval_every_n_steps"] == 0:
             
             #get eval loss and accuracy
             eval_loss_real, sent_eval_acc_real, overall_eval_acc_real = evaluate_model(model, eval_dataloader_real)
             
-            print(f"Evaluation Real - Step {global_step}, Eval Loss Real: {eval_loss_real:.4f}, Eval Overall Accuracy Real: {overall_eval_acc_real:.4f}, Eval Key-tokens Accuracy Real: {sent_eval_acc_real:.4f}")
+            print(f"Evaluation Real - Step {global_step}, Eval Loss Real: {eval_loss_real:.4f}, Eval Overall Accuracy Real: {overall_eval_acc_real:.4f}, Eval Key-tokens Accuracy Real: {sent_eval_acc_real}")
 
             eval_loss_sim, sent_eval_acc_sim, overall_eval_acc_sim = evaluate_model(model, eval_dataloader_sim)
 
-            print(f"Evaluation Simulation - Step {global_step}, Eval Loss Sim: {eval_loss_sim:.4f},  Eval Overall Accuracy Sim: {overall_eval_acc_sim:.4f}, Eval Key-tokens Accuracy Sim: {sent_eval_acc_sim:.4f}")
+            print(f"Evaluation Simulation - Step {global_step}, Eval Loss Sim: {eval_loss_sim:.4f},  Eval Overall Accuracy Sim: {overall_eval_acc_sim:.4f}, Eval Key-tokens Accuracy Sim: {sent_eval_acc_sim}")
             
             #calculate weighted average of eval loss
             avg_eval_loss = (eval_loss_real*hyperparameters["real_image_eval_weight"] + eval_loss_sim*hyperparameters["sim_image_eval_weight"]) / (hyperparameters["real_image_eval_weight"] + hyperparameters["sim_image_eval_weight"])
@@ -1109,11 +1246,11 @@ for epoch in range(max_epochs): # epochs loop
             #get test loss and accuracy
             test_loss_real, sent_test_acc_real, overall_test_acc_real = evaluate_model(model, test_dataloader_real)
 
-            print(f"Test Real - Step {global_step}, Test Loss Real: {test_loss_real:.4f}, Test Overall Accuracy Real: {overall_test_acc_real:.4f}, Test Key-tokens Accuracy Real: {sent_test_acc_real:.4f}")
+            print(f"Test Real - Step {global_step}, Test Loss Real: {test_loss_real:.4f}, Test Overall Accuracy Real: {overall_test_acc_real:.4f}, Test Key-tokens Accuracy Real: {sent_test_acc_real}")
 
             test_loss_sim, sent_test_acc_sim, overall_test_acc_sim = evaluate_model(model, test_dataloader_sim)
 
-            print(f"Test Sim - Step {global_step}, Test Loss Sim: {test_loss_sim:.4f}, Test Overall Accuracy Sim: {overall_test_acc_sim:.4f}, Test Key-tokens Accuracy Sim: {sent_test_acc_sim:.4f}")
+            print(f"Test Sim - Step {global_step}, Test Loss Sim: {test_loss_sim:.4f}, Test Overall Accuracy Sim: {overall_test_acc_sim:.4f}, Test Key-tokens Accuracy Sim: {sent_test_acc_sim}")
 
             #calculate weighted average of test loss
             avg_test_loss = (test_loss_real*hyperparameters["real_image_eval_weight"] + test_loss_sim*hyperparameters["sim_image_eval_weight"]) / (hyperparameters["real_image_eval_weight"] + hyperparameters["sim_image_eval_weight"])
@@ -1136,7 +1273,7 @@ for epoch in range(max_epochs): # epochs loop
                 "overall_test_acc_real": overall_test_acc_real,
                 "overall_test_acc_sim": overall_test_acc_sim,
                 "avg_test_acc": avg_test_acc,
-                "current_lr": optimizer.param_groups[0]['lr'], # Log current learning rate
+                # "current_lr": optimizer.param_groups[0]['lr'], # Already logged per step as learning_rate_actual
                 "step": global_step
             })
 
@@ -1144,23 +1281,23 @@ for epoch in range(max_epochs): # epochs loop
             is_early_stop_active_now = False
             if hyperparameters.get("early_stopping_enabled_globally", False):
                 active_ranges = hyperparameters.get("early_stopping_active_ranges", [])
-                for start_step, end_step in active_ranges:
-                    if start_step <= global_step <= end_step:
+                # Adjust active ranges based on warmups if necessary, or assume they are for global_step
+                # For now, assume active_ranges are direct global_step values
+                for start_step_es, end_step_es in active_ranges:
+                    if start_step_es <= global_step <= end_step_es:
                         is_early_stop_active_now = True
                         break
             
-            # Manage early_stopper instance based on current activity
             if is_early_stop_active_now:
-                if early_stopper is None: # True if first time active in a range, or reactivated
+                if early_stopper is None: 
                     early_stopper = EarlyStopping(patience=hyperparameters["early_stopping_patience"])
-                    print(f"Global Step {global_step}: Early stopping is NOW ACTIVE (within range [{start_step if 'start_step' in locals() else 'N/A'}, {end_step if 'end_step' in locals() else 'N/A'}]). Patience reset.")
+                    print(f"Global Step {global_step}: Early stopping is NOW ACTIVE. Patience reset.")
                     wandb.log({"early_stopping_status": "activated", "step": global_step, "epoch": epoch + 1})
-                # else: early_stopper already exists and is active, continue using it
-            else: # Early stopping is not active for this step
-                if early_stopper is not None: # True if it was active in the previous eval step and now is not
-                    print(f"Global Step {global_step}: Early stopping is NOW INACTIVE (outside active range or globally disabled).")
+            else: 
+                if early_stopper is not None: 
+                    print(f"Global Step {global_step}: Early stopping is NOW INACTIVE.")
                     wandb.log({"early_stopping_status": "deactivated", "step": global_step, "epoch": epoch + 1})
-                early_stopper = None # Ensure it's None if not active
+                early_stopper = None 
 
 
             if eval_mode == "loss":
@@ -1170,7 +1307,6 @@ for epoch in range(max_epochs): # epochs loop
                 evaluation_metric = avg_eval_acc
                 print(f"Using Average Eval Accuracy ({avg_eval_acc:.4f}) for LR scheduling and early stopping.")
             else:
-                # This check is also done when setting hyperparameters, but good for safety
                 raise ValueError(f"Invalid eval_mode: {eval_mode}. Please choose 'loss' or 'accuracy'.")
             
             metric_improved_and_checkpoint_saved = save_checkpoint_if_improved(
@@ -1178,47 +1314,36 @@ for epoch in range(max_epochs): # epochs loop
                     model=model,
                     step=global_step,
                     epoch=epoch + 1,
-                    checkpoint_path=best_checkpoint_path, # This is the existing path for best checkpoints
+                    checkpoint_path=best_checkpoint_path,
                     mode=eval_mode,
                     delta=hyperparameters["improvement_delta"]
-                ) # Save checkpoint if improvement is met, returns Improved: True or False
+                ) 
             
-            if current_scheduler_type == "ReduceLROnPlateau" and scheduler is not None:
-                old_lr = optimizer.param_groups[0]['lr'] # Get LR before potential reduction by scheduler
-                scheduler.step(evaluation_metric) # Step the scheduler using the chosen evaluation_metric
-                new_lr = optimizer.param_groups[0]['lr'] # Get LR after potential reduction
-
+            if current_scheduler_type == "ReduceLROnPlateau" and scheduler is not None: # Already guarded by not applied_segment_details["is_warmup"]
+                old_lr = optimizer.param_groups[0]['lr'] 
+                scheduler.step(evaluation_metric) 
+                new_lr = optimizer.param_groups[0]['lr'] 
                 lr_reduction_monitor.compare_lr(old_lr, new_lr)
-
             
-            # --- Learning Rate Scheduler and Early Stopping Logic ---
-            if is_early_stop_active_now and early_stopper is not None: # Check if active and instance exists
-               
-                # Check early stopping using the chosen evaluation_metric
-                # The save_checkpoint_if_improved function now handles the logic of comparing with best_metric_value_global
-                # and saving if improvement is met according to hyperparameters["improvement_delta"]
-            
-                early_stopper.check(metric_improved_and_checkpoint_saved) # reset internal counter if improved is true, otherwise increase by 1. If patience is met, set patience_met to True
+            if is_early_stop_active_now and early_stopper is not None:
+                early_stopper.check(metric_improved_and_checkpoint_saved) 
 
-                # Modified early stopping condition based on LR reductions and patience
                 if early_stopper.patience_met:
                     if current_scheduler_type == "ReduceLROnPlateau" and scheduler is not None:
                         if lr_reduction_monitor.lr_reduction_count >= hyperparameters["max_lr_reductions"]:
-                            print(f"Early stopping triggered: LR reduced {lr_reduction_monitor.lr_reduction_count}/{hyperparameters['max_lr_reductions']} times and {eval_mode} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met). Early stopping.")
+                            print(f"Early stopping triggered: LR reduced {lr_reduction_monitor.lr_reduction_count}/{hyperparameters['max_lr_reductions']} times and {eval_mode} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations. Stopping.")
                             stop_training = True
-                            # break # This break is for the batch loop, outer loop break is handled below
                         else:
-                            print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met), but max LR reductions ({lr_reduction_monitor.lr_reduction_count}/{hyperparameters['max_lr_reductions']}) not reached yet. Current LR: {optimizer.param_groups[0]['lr']}. Continuing training.")
-                            # stop_training = False # redundant set to False, but good for clarity and safety
-                    else: # Schedulers other than ReduceLROnPlateau, or no scheduler
+                            print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations, but max LR reductions ({lr_reduction_monitor.lr_reduction_count}/{hyperparameters['max_lr_reductions']}) not reached. Continuing.")
+                    else: 
                         current_lr_val = optimizer.param_groups[0]['lr']
-                        print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations (patience met). Scheduler is {current_scheduler_type}. Current LR: {current_lr_val}. Early stopping.")
+                        print(f"{eval_mode.capitalize()} metric ({evaluation_metric:.4f}) hasn't improved for {early_stopper.patience} evaluations. Scheduler is {current_scheduler_type}. Current LR: {current_lr_val}. Early stopping.")
                         stop_training = True
-                        # break # This break is for the batch loop, outer loop break is handled below
             
-            last_eval_loss_real, last_sent_eval_acc_real, last_overall_eval_acc_real, last_eval_loss_sim, last_sent_eval_acc_sim, last_overall_eval_acc_sim, last_avg_eval_loss, last_test_loss_real, last_sent_test_acc_real, last_overall_test_acc_real, last_test_loss_sim, last_sent_test_acc_sim, last_overall_test_acc_sim, last_avg_test_loss, last_avg_test_acc = eval_loss_real, sent_eval_acc_real, overall_eval_acc_real, eval_loss_sim, sent_eval_acc_sim, overall_eval_acc_sim, avg_eval_loss, test_loss_real, sent_test_acc_real, overall_test_acc_real, test_loss_sim, sent_test_acc_sim, overall_test_acc_sim, avg_test_loss, avg_test_acc # update last known evaluation metrics, could have created a list for this and changes them via the list but whatever
+            last_eval_loss_real, last_sent_eval_acc_real, last_overall_eval_acc_real, last_eval_loss_sim, last_sent_eval_acc_sim, last_overall_eval_acc_sim, last_avg_eval_loss, last_avg_eval_acc, last_test_loss_real, last_sent_test_acc_real, last_overall_test_acc_real, last_test_loss_sim, last_sent_test_acc_sim, last_overall_test_acc_sim, last_avg_test_loss, last_avg_test_acc = eval_loss_real, sent_eval_acc_real, overall_eval_acc_real, eval_loss_sim, sent_eval_acc_sim, overall_eval_acc_sim, avg_eval_loss, avg_eval_acc, test_loss_real, sent_test_acc_real, overall_test_acc_real, test_loss_sim, sent_test_acc_sim, overall_test_acc_sim, avg_test_loss, avg_test_acc
 
-        # If early stopping was triggered from within the evaluation block, break batch loop
+        global_step += 1 # Increment global_step after all operations for the current step are done
+
         if stop_training:
             break
 
