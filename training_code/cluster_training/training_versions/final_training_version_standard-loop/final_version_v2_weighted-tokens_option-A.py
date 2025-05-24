@@ -23,18 +23,18 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 cluster_flag = True
 model_type = "1.3B"
-eval_mode = "accuracy" # "loss" or "accuracy"
+eval_mode = "loss" # "loss" or "accuracy"
 
 
 # ------ Configuration & Hyperparameters ------
 
-phase_2_start = 2000
-phase_3_start = 4000
+phase_2_start = 500
+phase_3_start = 1000
 
 hyperparameters = {
 
     "base_checkpoint_dir": "./", # Base directory for checkpoints
-    "run_name_prefix": "1.3b_Option-A-first-run-v3", # Prefix for run names and checkpoint subdirs
+    "run_name_prefix": "1.3b_Option-B/second_version/first-run", # Prefix for run names and checkpoint subdirs
     "eval_every_n_steps": 500, # Will be overridden by phase-specific settings
     "master_seed": 42,
     "num_workers_dataloader": 4,
@@ -58,15 +58,17 @@ hyperparameters = {
     "lr_scheduler_patience": 2 if eval_mode == "accuracy" else 1,
     "lr_scheduler_factor": 0.5,
     "early_stopping_patience": 5 if eval_mode == "accuracy" else 3,
+    "manual_eval_save_count":[1,2],
+    "manual_eval_save": True,
 
-    "improvement_delta": 0.0001 if eval_mode == "accuracy" else 0.0001,
+    "improvement_delta": 0.001 if eval_mode == "accuracy" else 0.0001,
     "weight_decay": 0.01,  # Initialized to Phase 1, will be managed by phase logic
     "beta1": 0.9,          # Added: Beta1 for AdamW
     "beta2": 0.95,        # Added: Beta2 for AdamW
     "grad_clip_norm": 1.0, # Initialized to Phase 1, will be managed by phase logic
 
     # Phase-specific hyperparameters
-    "learning_rate_phases": [2e-4, 1e-4, 5e-5], # LR for Main Phase 1, Main Phase 2, Main Phase 3
+    "learning_rate_phases": [2e-4, 5e-5, 5e-5], # LR for Main Phase 1, Main Phase 2, Main Phase 3
     "weight_decay_phases": [0.0, 0.0, 0.0], # WD for Main Phase 1, Main Phase 2, Main Phase 3 (and their warmups)
     "grad_clip_norm_phases": [1.0, 1.0, 1.0],   # Grad Clip for Main Phase 1, Main Phase 2, Main Phase 3 (and their warmups)
     "phase_boundaries": [phase_2_start, phase_3_start], # conceptual_global_step counts where main phases *would* change if no warmups
@@ -75,20 +77,20 @@ hyperparameters = {
     "warmup_steps_phases": [100, 100, 100], # Number of warmup steps for WU1, WU2, WU3 respectively
 
     # --- Phase-specific Learning Rate Scheduler Hyperparameters (for Main Phases) ---
-    "lr_scheduler_types_phases": ["CosineAnnealingWarmRestarts", "CosineAnnealingWarmRestarts", "ReduceLROnPlateau"], # Scheduler type for each main phase
+    "lr_scheduler_types_phases": ["CosineAnnealingWarmRestarts", "StepLR", "CosineAnnealingWarmRestarts"], # Scheduler type for each main phase, available: ReduceLROnPlateau, CosineAnnealingWarmRestarts, StepLR
 
     # Parameters for CosineAnnealingWarmRestarts (used if "CosineAnnealingWarmRestarts" is selected for a main phase)
-    "cosine_warm_restarts_t_0_phases": [1000, 1000, 1000], # Example T_0 values for each main phase
+    "cosine_warm_restarts_t_0_phases": [10, 100, 100], # Example T_0 values for each main phase
     "cosine_warm_restarts_t_mult_phases": [1, 1, 1],      # Example T_mult values for each main phase
 
     # Parameters for StepLR (used if "StepLR" is selected for a main phase)
-    "step_lr_step_size_phases": [200, 200, 100], # step_size for StepLR for each main phase
-    "step_lr_gamma_phases": [0.7, 0.5, 0.5],       # gamma for StepLR for each main phase
+    "step_lr_step_size_phases": [100, 100, 50], # step_size for StepLR for each main phase
+    "step_lr_gamma_phases": [0.75, 0.75, 0.5],       # gamma for StepLR for each main phase
 
     # --- Phase-specific Token Weights and Eval Frequency (for Main Phases and their Warmups) ---
     "keyword_weight_phases": [1.0, 1.5, 1.5],       # Keyword token weight for each phase (applies to WU and Main)
     "background_weight_phases": [1.0, 1.0, 0.5],    # Background token weight for each phase (applies to WU and Main)
-    "eval_every_n_steps_phases": [500, 200, 100],   # Evaluation frequency for each main phase (evaluation skipped in WU)
+    "eval_every_n_steps_phases": [250, 50, 100],   # Evaluation frequency for each main phase (evaluation skipped in WU)
 
     # Note: "lr_scheduler_patience", "lr_scheduler_factor", "lr_scheduler_mode", "min_lr",
     # "max_lr_reductions" are still in hyperparameters.
@@ -326,12 +328,10 @@ def custom_forward(batch, model):
         if not found_match_for_sample:
             # This case should ideally not be hit if "Assistant:" is always present
             # and unique as per the problem description.
-            print(f"WARNING: The 'Assistant:' phrase (tokens: {assistant_token_ids}) was not found in sample {i} of the batch. "
-                  f"Input IDs for sample: {sample_input_ids.tolist()}. "
-                  f"Applying a fallback mask (first 1014 tokens or sequence length) for this sample.")
-            # Fallback to a default masking length, ensuring it doesn't exceed sequence length
-            effective_mask_len = min(1014, sample_input_ids.size(0))
-            labels[i, :effective_mask_len] = -100
+            error_msg = (f"ERROR: The 'Assistant:' phrase (tokens: {assistant_token_ids}) was not found in sample {i} of the batch. "
+                      f"Input IDs for sample: {sample_input_ids.tolist()}. "
+                      f"This is a critical error - the Assistant: token must be present in all samples.")
+            raise ValueError(error_msg)
             
     # Original masking for padding tokens (tokens where attention_mask is 0)
     # This should be applied after the prompt masking.
@@ -351,11 +351,12 @@ def custom_forward(batch, model):
 def weighted_loss_calculation(logits, labels, sentinel_ids, keyword_weight, background_weight):
 
     weights = torch.full_like(labels, background_weight, dtype=torch.float32)  
-    for token, token_id in sentinel_ids.items():                              
-        idxs = (labels == token_id).nonzero(as_tuple=False)                 
+    for token, sent_id in sentinel_ids.items():                              
+        idxs = (labels == sent_id).nonzero(as_tuple=False)                 
         for batch_idx, sentinel_idx in idxs:                                              
+            # Apply keyword_weight to the sentinel and the token immediately following the sentinel
             if sentinel_idx + 1 < labels.size(1):                                 
-                weights[batch_idx, sentinel_idx + 1] = keyword_weight                     
+                weights[batch_idx, sentinel_idx : sentinel_idx + 1] = keyword_weight                     
 
     # shift for causal LM                                              
     shift_logits  = logits[:, :-1, :].contiguous()                     
@@ -579,6 +580,11 @@ def worker_init_fn(worker_id):
     random.seed(worker_seed)
 
 # ------ Calculate actual segment start steps ------
+
+# Current number of evaluation-step.
+
+current_eval_count = 0
+
 # These define the global_step at which each segment (Warmup or Main Phase) begins.
 segment_start_steps = {}
 conceptual_pb = hyperparameters["phase_boundaries"]
@@ -924,11 +930,12 @@ scheduler_mode = hyperparameters["lr_scheduler_mode"]
 #optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4) # torch optimizer
 # Initial LR for optimizer: min_lr if WU1 has steps, else P1's LR.
 initial_optimizer_lr = hyperparameters["min_lr"] if hyperparameters["warmup_steps_phases"][0] > 0 else hyperparameters["learning_rate_phases"][0]
-optimizer = bnb.optim.AdamW(
+optimizer = bnb.optim.AdamW8bit(
     model.parameters(),
     lr=initial_optimizer_lr, # Set initial LR
     betas=(hyperparameters["beta1"], hyperparameters["beta2"]),
-    weight_decay=hyperparameters["weight_decay_phases"][0] # Initial WD (WU1/P1)
+    weight_decay=hyperparameters["weight_decay_phases"][0], # Initial WD (WU1/P1)
+    is_paged = True
 ) # paged optimizer
 
 # --- Initialize Learning Rate Scheduler ---
@@ -1230,6 +1237,32 @@ for epoch in range(max_epochs): # epochs loop
             
             #get eval loss and accuracy
             eval_loss_real, sent_eval_acc_real, overall_eval_acc_real = evaluate_model(model, eval_dataloader_real)
+
+            current_eval_count +=1
+
+            # Save manual eval checkpoint
+            if current_eval_count in hyperparameters["manual_eval_save_count"] and hyperparameters["manual_eval_save"]:
+                manual_eval_chkpoint = os.path.join(hyperparameters["checkpoint_dir"], f"manual_eval_chkpoint_{current_eval_count}/")
+                model.save_pretrained(manual_eval_chkpoint)
+                print(f"first epoch checkpoint saved at time:{time.strftime('%Y-%m-%d %H:%M:%S')}")
+                # Add metadata about this checkpoint
+                metadata = {
+                    "eval_mode": eval_mode,
+                    "eval count": current_eval_count,
+                    "step": global_step,
+                    #"train_loss": total_epoch_train_loss / total_samples if total_samples > 0 else 0.0, # Use current epoch's avg train loss
+                    "eval_metric_real": last_eval_loss_real if eval_mode == "loss" else last_overall_eval_acc_real, # Will be 0.0 if no eval step yet, otherwise last eval
+                    "eval_metric_sim": last_eval_loss_sim if eval_mode == "loss" else last_overall_eval_acc_sim,   # Will be 0.0 if no eval step yet, otherwise last eval
+                    "avg_eval_metric": last_avg_eval_loss if eval_mode == "loss" else last_avg_eval_acc,
+                    "test_metric_real": last_test_loss_real if eval_mode == "loss" else last_overall_test_acc_real, # Will be 0.0 if no eval step yet, otherwise last eval
+                    "test_metric_sim": last_test_loss_sim if eval_mode == "loss" else last_overall_test_acc_sim,   # Will be 0.0 if no eval step yet, otherwise last eval
+                    "avg_test_metric": last_avg_test_loss if eval_mode == "loss" else last_avg_test_acc,
+                    "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+
+                with open(os.path.join(manual_eval_chkpoint, "checkpoint_metadata.json"), "w") as f:
+                    json.dump(metadata, f, indent=4)
+                wandb.log({"Manual_eval_checkpoint_saved": True})
             
             print(f"Evaluation Real - Step {global_step}, Eval Loss Real: {eval_loss_real:.4f}, Eval Overall Accuracy Real: {overall_eval_acc_real:.4f}, Eval Key-tokens Accuracy Real: {sent_eval_acc_real}")
 

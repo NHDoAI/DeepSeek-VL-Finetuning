@@ -424,6 +424,7 @@ training_code/test_tensor.py
 training_v1_eval-batch.py
 training_script_versions.txt
 *.safetensors
+scp_command.txt
 
 #un-needed folders
 random_scripts/
