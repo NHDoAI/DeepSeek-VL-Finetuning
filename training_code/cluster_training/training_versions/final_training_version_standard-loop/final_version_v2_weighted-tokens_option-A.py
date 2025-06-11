@@ -80,7 +80,7 @@ hyperparameters = {
     "lr_scheduler_types_phases": ["CosineAnnealingWarmRestarts", "StepLR", "CosineAnnealingWarmRestarts"], # Scheduler type for each main phase, available: ReduceLROnPlateau, CosineAnnealingWarmRestarts, StepLR
 
     # Parameters for CosineAnnealingWarmRestarts (used if "CosineAnnealingWarmRestarts" is selected for a main phase)
-    "cosine_warm_restarts_t_0_phases": [10, 100, 100], # Example T_0 values for each main phase
+    "cosine_warm_restarts_t_0_phases": [100, 100, 100], # Example T_0 values for each main phase
     "cosine_warm_restarts_t_mult_phases": [1, 1, 1],      # Example T_mult values for each main phase
 
     # Parameters for StepLR (used if "StepLR" is selected for a main phase)
@@ -90,7 +90,7 @@ hyperparameters = {
     # --- Phase-specific Token Weights and Eval Frequency (for Main Phases and their Warmups) ---
     "keyword_weight_phases": [1.0, 1.5, 1.5],       # Keyword token weight for each phase (applies to WU and Main)
     "background_weight_phases": [1.0, 1.0, 0.5],    # Background token weight for each phase (applies to WU and Main)
-    "eval_every_n_steps_phases": [250, 50, 100],   # Evaluation frequency for each main phase (evaluation skipped in WU)
+    "eval_every_n_steps_phases": [100, 100, 50],   # Evaluation frequency for each main phase (evaluation skipped in WU)
 
     # Note: "lr_scheduler_patience", "lr_scheduler_factor", "lr_scheduler_mode", "min_lr",
     # "max_lr_reductions" are still in hyperparameters.
@@ -1191,7 +1191,7 @@ for epoch in range(max_epochs): # epochs loop
         #scaled_loss = loss / accum_steps                                   
         loss.backward()     
 
-        log_memory_flex("After loss backward:",gpu_id=gpu_id, device_name=device_name)
+        log_memory_flex(cluster_flag, "After loss backward:",gpu_id=gpu_id, device_name=device_name)
 
         # Gradient Clipping
         if hyperparameters["grad_clip_norm"] > 0:
@@ -1206,7 +1206,7 @@ for epoch in range(max_epochs): # epochs loop
            scheduler is not None:
             scheduler.step()
 
-        log_memory_flex("After parameters update:",gpu_id=gpu_id, device_name=device_name)
+        log_memory_flex(cluster_flag, "After parameters update:",gpu_id=gpu_id, device_name=device_name)
 
         #total_epoch_train_loss += loss.item()*current_batch_size # loss.item() returns singular value of loss, also bring it back to CPU so can be mulitplied with current_batch_size
         total_samples += current_batch_size

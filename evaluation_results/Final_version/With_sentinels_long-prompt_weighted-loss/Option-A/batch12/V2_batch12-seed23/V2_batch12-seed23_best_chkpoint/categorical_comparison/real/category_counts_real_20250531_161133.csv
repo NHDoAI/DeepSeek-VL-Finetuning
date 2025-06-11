@@ -1,0 +1,27 @@
+Category,Type,Value,Count
+lane,ground_truth,left lane,91
+lane,ground_truth,right lane,91
+lane,ground_truth,unclear,34
+lane,model,left lane,90
+lane,model,right lane,94
+lane,model,unclear,32
+obstacle,ground_truth,far away,70
+obstacle,ground_truth,near,56
+obstacle,ground_truth,very close,14
+obstacle,ground_truth,not on the same lane,76
+obstacle,model,far away,61
+obstacle,model,near,72
+obstacle,model,very close,3
+obstacle,model,not on the same lane,80
+decision,ground_truth,straight forward,146
+decision,ground_truth,slow cruise,56
+decision,ground_truth,switch lane,14
+decision,model,straight forward,141
+decision,model,slow cruise,72
+decision,model,switch lane,3
+final_decision,ground_truth,straight forward,146
+final_decision,ground_truth,slow cruise,56
+final_decision,ground_truth,switch lane,14
+final_decision,model,straight forward,141
+final_decision,model,slow cruise,72
+final_decision,model,switch lane,3

@@ -1279,7 +1279,7 @@ for epoch in range(max_epochs): # epochs loop
         #scaled_loss = loss / accum_steps                                   
         loss.backward()     
 
-        log_memory_flex("After loss backward:",gpu_id=gpu_id, device_name=device_name)
+        log_memory_flex(cluster_flag, "After loss backward:",gpu_id=gpu_id, device_name=device_name)
 
         # Gradient Clipping
         if hyperparameters["grad_clip_norm"] > 0:
@@ -1294,7 +1294,7 @@ for epoch in range(max_epochs): # epochs loop
            scheduler is not None:
             scheduler.step()
 
-        log_memory_flex("After parameters update:",gpu_id=gpu_id, device_name=device_name)
+        log_memory_flex(cluster_flag,"After parameters update:",gpu_id=gpu_id, device_name=device_name)
 
         #total_epoch_train_loss += loss.item()*current_batch_size # loss.item() returns singular value of loss, also bring it back to CPU so can be mulitplied with current_batch_size
         total_samples += current_batch_size
@@ -1481,6 +1481,30 @@ for epoch in range(max_epochs): # epochs loop
         "epoch": epoch + 1
     })
     
+     # Save first epoch checkpoint
+    if epoch == 0:
+        first_epoch_chkpoint = os.path.join(hyperparameters["checkpoint_dir"], "first_epoch_chkpoint/")
+        model.save_pretrained(first_epoch_chkpoint)
+        print(f"first epoch checkpoint saved at time:{time.strftime('%Y-%m-%d %H:%M:%S')}")
+        # Add metadata about this checkpoint
+        metadata = {
+            "eval_mode": eval_mode,
+            "epoch": epoch+1,
+            "step": global_step,
+            #"train_loss": total_epoch_train_loss / total_samples if total_samples > 0 else 0.0, # Use current epoch's avg train loss
+            "eval_metric_real": last_eval_loss_real if eval_mode == "loss" else last_overall_eval_acc_real, # Will be 0.0 if no eval step yet, otherwise last eval
+            "eval_metric_sim": last_eval_loss_sim if eval_mode == "loss" else last_overall_eval_acc_sim,   # Will be 0.0 if no eval step yet, otherwise last eval
+            "avg_eval_metric": last_avg_eval_loss if eval_mode == "loss" else last_avg_eval_acc,
+            "test_metric_real": last_test_loss_real if eval_mode == "loss" else last_overall_test_acc_real, # Will be 0.0 if no eval step yet, otherwise last eval
+            "test_metric_sim": last_test_loss_sim if eval_mode == "loss" else last_overall_test_acc_sim,   # Will be 0.0 if no eval step yet, otherwise last eval
+            "avg_test_metric": last_avg_test_loss if eval_mode == "loss" else last_avg_test_acc,
+            "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        with open(os.path.join(first_epoch_chkpoint, "checkpoint_metadata.json"), "w") as f:
+            json.dump(metadata, f, indent=4)
+        wandb.log({"first_epoch_checkpoint_saved": True})
+
 
 # --- Log artifacts to wandb ---
 run.log_artifact(dataset_artifact)
