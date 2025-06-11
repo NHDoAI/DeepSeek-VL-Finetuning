@@ -1,0 +1,1 @@
+For dataset that was optimized (balanced, trimmed) and with sentinels removed, prompts shortened, categories and lidar data added.
