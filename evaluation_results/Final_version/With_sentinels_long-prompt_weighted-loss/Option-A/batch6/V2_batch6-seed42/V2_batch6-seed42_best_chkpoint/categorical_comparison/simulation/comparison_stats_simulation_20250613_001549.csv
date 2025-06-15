@@ -1,0 +1,19 @@
+Category,Total Rows,Matching Rows,Non-Matching Rows,Match Percentage
+lane,436,434,2,99.54%
+obstacle,436,389,47,89.22%
+decision,436,403,33,92.43%
+final_decision,436,403,33,92.43%
+
+lane:left lane,214,213,1,99.53%
+lane:right lane,214,214,0,100.00%
+lane:unclear,8,7,1,87.50%
+obstacle:far away,98,84,14,85.71%
+obstacle:near,78,60,18,76.92%
+obstacle:very close,62,47,15,75.81%
+obstacle:not on the same lane,198,198,0,100.00%
+decision:straight forward,296,296,0,100.00%
+decision:slow cruise,78,60,18,76.92%
+decision:switch lane,62,47,15,75.81%
+final_decision:straight forward,296,296,0,100.00%
+final_decision:slow cruise,78,60,18,76.92%
+final_decision:switch lane,62,47,15,75.81%

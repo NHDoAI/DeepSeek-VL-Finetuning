@@ -84,15 +84,6 @@ def merge_model(base_model_name, adapter_checkpoint, output_dir):
     vl_chat_processor = VLChatProcessor.from_pretrained(base_model_name, trust_remote_code=True) # use the base model's tokenizer
     tokenizer = vl_chat_processor.tokenizer
     
-    # Define and add new special tokens to the base tokenizer since it does not have them originally
-    new_special_tokens = ["<LANE>", "<OBS>", "<DEC>"]
-    num_added_toks = tokenizer.add_special_tokens({"additional_special_tokens": new_special_tokens})
-
-    if num_added_toks > 0:
-        print(f"Added {num_added_toks} new special tokens to the tokenizer: {new_special_tokens}")
-    else:
-        print(f"The special tokens {new_special_tokens} were already present in the loaded tokenizer.")
-
     # Set pad_token if it's not already set (often eos_token is used as pad_token)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -116,16 +107,6 @@ def merge_model(base_model_name, adapter_checkpoint, output_dir):
     )
     print("Base model loaded.")
     
-    # Resize the base model's token embeddings to accommodate new tokens
-    # This must be done *before* loading the PeftModel
-    print(f"Resizing token embeddings of the language model component if necessary.")
-    current_model_vocab_size = base_model.language_model.get_input_embeddings().weight.size(0)
-    if current_model_vocab_size != len(tokenizer):
-        print(f"Resizing base model token embeddings from {current_model_vocab_size} to {len(tokenizer)}.")
-        base_model.language_model.resize_token_embeddings(len(tokenizer))
-    else:
-        print("Base model token embedding size already matches the tokenizer's vocabulary size.")
-        
     # Load model with adapter
     print(f"Loading PEFT model with adapter from '{adapter_checkpoint}'...")
     model_with_adapter = PeftModel.from_pretrained(base_model, adapter_checkpoint)
@@ -136,7 +117,7 @@ def merge_model(base_model_name, adapter_checkpoint, output_dir):
     merged_model = model_with_adapter.merge_and_unload()
     print("Adapter merged and unloaded.")
     
-    fp16_model_path = os.path.join(output_dir, "fp16_model")
+    fp16_model_path = os.path.join(output_dir, "_fp16_model")
 
     # Save merged model
     print(f"Saving merged model to {fp16_model_path}...")
@@ -171,7 +152,7 @@ def quantize_model(model_path, output_dir):
         device_map="auto",          # loads sharded across available GPUs
     )
 
-    merged_4bits_path = os.path.join(output_dir, "4bit_model")
+    merged_4bits_path = os.path.join(output_dir, "_4bit_model")
     model_4bit.save_pretrained(merged_4bits_path, safe_serialization=True)
     vl_chat_processor.save_pretrained(merged_4bits_path)
     print(f"4 bits model quantized and saved at {merged_4bits_path}")
@@ -196,20 +177,6 @@ def run_inference(model_path, base_labels_dir, mode = "fp16"):
     tokenizer = vl_chat_processor.tokenizer
     print("Chat processor and tokenizer loaded.")
 
-    # Define and add new special tokens to the tokenizer (ensures consistency)
-    new_special_tokens = ["<LANE>", "<OBS>", "<DEC>"]
-    num_added_toks = tokenizer.add_special_tokens({"additional_special_tokens": new_special_tokens})
-
-    if num_added_toks > 0:
-        print(f"Added {num_added_toks} new special tokens to the tokenizer for inference: {new_special_tokens}")
-    else:
-        print(f"The special tokens {new_special_tokens} were already present in the loaded tokenizer for inference.")
-
-    # Set pad_token if it's not already set
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        print(f"Set tokenizer.pad_token to tokenizer.eos_token ('{tokenizer.eos_token}') for inference.")
-        
     # Load the model (once)
 
     if mode == "fp16":
@@ -233,17 +200,6 @@ def run_inference(model_path, base_labels_dir, mode = "fp16"):
             device_map="auto"
         )
     print("Model loaded for inference.")
-
-
-    
-    # Resize model's token embeddings if its vocabulary size doesn't match the tokenizer's.
-    print("Checking model token embedding size for inference...")
-    current_model_vocab_size = vl_gpt.language_model.get_input_embeddings().weight.size(0)
-    if current_model_vocab_size != len(tokenizer):
-        print(f"Resizing model token embeddings for inference from {current_model_vocab_size} to {len(tokenizer)}.")
-        vl_gpt.language_model.resize_token_embeddings(len(tokenizer))
-    else:
-        print("Model token embedding size already matches the tokenizer's vocabulary size for inference.")
 
     vl_gpt = vl_gpt.eval()
     
@@ -429,7 +385,7 @@ def extract_categories_from_results(results_dir, output_dir, overall_timestamp):
             best_score_for_lane_extraction = -1
             best_matched_phrase_for_lane = ""
             for option in lane_options:
-                current_dynamic_query_lane = f"current lane is <LANE> {option}"
+                current_dynamic_query_lane = f"current lane is {option}"
                 temp_matched_phrase, temp_score = extract_phrase(data_item.lower(), current_dynamic_query_lane.lower())
                 if temp_score > best_score_for_lane_extraction:
                     best_score_for_lane_extraction = temp_score
@@ -442,7 +398,7 @@ def extract_categories_from_results(results_dir, output_dir, overall_timestamp):
             best_score_for_obstacle_extraction = -1
             best_matched_phrase_for_obstacle = ""
             for option in obstacles_options:
-                current_dynamic_query_obstacle = f"Obstacles are <OBS> {option}"
+                current_dynamic_query_obstacle = f"Obstacles are {option}"
                 temp_matched_phrase, temp_score = extract_phrase(data_item.lower(), current_dynamic_query_obstacle.lower())
                 if temp_score > best_score_for_obstacle_extraction:
                     best_score_for_obstacle_extraction = temp_score
@@ -455,7 +411,7 @@ def extract_categories_from_results(results_dir, output_dir, overall_timestamp):
             best_score_for_decision_extraction = -1
             best_matched_phrase_for_decision = ""
             for option in decision_options:
-                current_dynamic_query_decision = f"optimal movement decision is <DEC> {option}"
+                current_dynamic_query_decision = f"optimal movement decision is {option}"
                 temp_matched_phrase, temp_score = extract_phrase(data_item.lower(), current_dynamic_query_decision.lower())
                 if temp_score > best_score_for_decision_extraction:
                     best_score_for_decision_extraction = temp_score
@@ -468,7 +424,7 @@ def extract_categories_from_results(results_dir, output_dir, overall_timestamp):
             best_score_for_final_decision_extraction = -1
             best_matched_phrase_for_final_decision = ""
             for option in final_decision_options:
-                current_dynamic_query_final_decision = f"[Final Decision]\n <DEC> {option}"
+                current_dynamic_query_final_decision = f"[Final Decision]\n {option}"
                 temp_matched_phrase, temp_score = extract_phrase(data_item.lower(), current_dynamic_query_final_decision.lower())
                 if temp_score > best_score_for_final_decision_extraction:
                     best_score_for_final_decision_extraction = temp_score
@@ -527,7 +483,7 @@ def compare_results_with_ground_truth(model_results_csv_paths_list, overall_time
     print(f"\nStarting comparison with ground truth using timestamp: {overall_timestamp}...")
 
     # Output directory for all comparisons, relative to the script's location
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    #script_dir = os.path.dirname(os.path.abspath(__file__))
     base_comparison_dir = os.path.join(script_dir, "categorical_comparison")
     os.makedirs(base_comparison_dir, exist_ok=True)
     print(f"Comparison reports will be saved in subdirectories of: {base_comparison_dir}")
@@ -577,9 +533,8 @@ def compare_results_with_ground_truth(model_results_csv_paths_list, overall_time
         }
         
         # Prepare results (EXISTING LOGIC)
-        comparison_results_stats = {} 
-        category_counts_data = {}
-        sub_category_comparison_stats_for_current_file = [] # To store sub-category stats
+        comparison_results_stats = {} # Renamed to avoid conflict if 'comparison_results' is used elsewhere
+        category_counts_data = {}   # Renamed to avoid conflict
         
         for column in columns_to_compare:
             # Create merged dataframe for this column (EXISTING LOGIC)
@@ -618,43 +573,21 @@ def compare_results_with_ground_truth(model_results_csv_paths_list, overall_time
                 'non_matching_rows': non_matching_rows,
                 'match_percentage': match_percentage
             }
-
-            # --- START: Calculate and store sub-category statistics ---
-            if column in category_orders:
-                for sub_category_value in category_orders[column]:
-                    # Filter for rows where the ground truth is this specific sub-category
-                    sub_category_df = merged_df[merged_df[gt_col_name] == sub_category_value]
-                    
-                    sub_total_rows = len(sub_category_df)
-                    
-                    if sub_total_rows > 0:
-                        # 'is_same' is True if model prediction matches ground truth.
-                        # For this sub_category_df, 'is_same' being True means
-                        # the model also predicted this sub_category_value.
-                        sub_matching_rows = sub_category_df['is_same'].sum()
-                        sub_non_matching_rows = sub_total_rows - sub_matching_rows
-                        sub_match_percentage = (sub_matching_rows / sub_total_rows * 100)
-                    else:
-                        sub_matching_rows = 0
-                        sub_non_matching_rows = 0
-                        sub_match_percentage = 0.0 # Or handle as NaN or skip if preferred
-
-                    # Store sub-category statistics
-                    sub_category_name_for_csv = f"{column}:{sub_category_value}"
-                    sub_category_comparison_stats_for_current_file.append({
-                        'category_name': sub_category_name_for_csv,
-                        'total_rows': sub_total_rows,
-                        'matching_rows': sub_matching_rows,
-                        'non_matching_rows': sub_non_matching_rows,
-                        'match_percentage': sub_match_percentage
-                    })
-            # --- END: Calculate and store sub-category statistics ---
             
             # Store category counts (EXISTING LOGIC)
             category_counts_data[column] = {
                 'ground_truth': merged_df[gt_col_name].value_counts().to_dict(),
                 'model': merged_df[model_col_name].value_counts().to_dict()
             }
+            
+            # Print statistics (EXISTING LOGIC - can be kept or removed if too verbose)
+            print(f"\n    Statistics for '{column}' (data type: {data_type}):")
+            print(f"    Total rows: {total_rows}")
+            print(f"    Matching rows: {matching_rows} ({match_percentage:.2f}%)")
+            print(f"    Non-matching rows: {non_matching_rows} ({100-match_percentage if total_rows > 0 else 0:.2f}%)")
+            print(f"\n    Category Counts for '{column}' (data type: {data_type}):")
+            print(f"    Ground Truth: {category_counts_data[column]['ground_truth']}")
+            print(f"    Model: {category_counts_data[column]['model']}")
         
         # Save comparison results to CSV (ADAPTED OUTPUT PATH AND FILENAME)
         comparison_stats_file = os.path.join(type_specific_comparison_output_dir, f'comparison_stats_{data_type}_{overall_timestamp}.csv')
@@ -662,7 +595,6 @@ def compare_results_with_ground_truth(model_results_csv_paths_list, overall_time
         with open(comparison_stats_file, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['Category', 'Total Rows', 'Matching Rows', 'Non-Matching Rows', 'Match Percentage'])
-            # Write main category stats
             for category, stats in comparison_results_stats.items():
                 writer.writerow([
                     category, 
@@ -671,18 +603,6 @@ def compare_results_with_ground_truth(model_results_csv_paths_list, overall_time
                     stats['non_matching_rows'], 
                     f"{stats['match_percentage']:.2f}%"
                 ])
-            
-            # --- START: Write sub-category statistics ---
-            # These were collected in order (all sub-cats for 'lane', then 'obstacle', etc.)
-            for stats in sub_category_comparison_stats_for_current_file:
-                writer.writerow([
-                    stats['category_name'],
-                    stats['total_rows'],
-                    stats['matching_rows'],
-                    stats['non_matching_rows'],
-                    f"{stats['match_percentage']:.2f}%"
-                ])
-            # --- END: Write sub-category statistics ---
         generated_comparison_files.append(comparison_stats_file)
         
         # Save category counts to CSV (ADAPTED OUTPUT PATH AND FILENAME)
@@ -692,12 +612,12 @@ def compare_results_with_ground_truth(model_results_csv_paths_list, overall_time
             writer = csv.writer(f)
             writer.writerow(['Category', 'Type', 'Value', 'Count'])
             
-            # --- START: Write all ground truth counts first ---
             for category_key in columns_to_compare: # Iterate through the order they were processed
                 if category_key in category_orders and category_key in category_counts_data:
                     ordered_values = category_orders[category_key]
+                    
+                    # Ground truth counts for this category
                     ground_truth_counts = category_counts_data[category_key]['ground_truth']
-                    # Write ground truth counts in specified order
                     for value in ordered_values:
                         count = ground_truth_counts.get(value, 0)
                         writer.writerow([category_key, 'ground_truth', value, count])
@@ -705,22 +625,9 @@ def compare_results_with_ground_truth(model_results_csv_paths_list, overall_time
                     for value, count in ground_truth_counts.items():
                         if value not in ordered_values:
                              writer.writerow([category_key, 'ground_truth', value, count])
-                elif category_key in category_counts_data: # Fallback if category not in category_orders
-                     print(f"    Warning: Category '{category_key}' not found in category_orders for ground_truth. Writing counts without specific order.")
-                     ground_truth_counts = category_counts_data[category_key]['ground_truth']
-                     for value, count in ground_truth_counts.items():
-                        writer.writerow([category_key, 'ground_truth', value, count])
-            # --- END: Write all ground truth counts ---
 
-            # Insert an empty row
-            writer.writerow([])
-
-            # --- START: Write all model counts ---
-            for category_key in columns_to_compare: # Iterate through the order they were processed
-                if category_key in category_orders and category_key in category_counts_data:
-                    ordered_values = category_orders[category_key]
+                    # Model counts for this category
                     model_counts = category_counts_data[category_key]['model']
-                    # Write model counts in specified order
                     for value in ordered_values:
                         count = model_counts.get(value, 0)
                         writer.writerow([category_key, 'model', value, count])
@@ -729,11 +636,14 @@ def compare_results_with_ground_truth(model_results_csv_paths_list, overall_time
                         if value not in ordered_values:
                             writer.writerow([category_key, 'model', value, count])
                 elif category_key in category_counts_data: # Fallback if category not in category_orders
-                     print(f"    Warning: Category '{category_key}' not found in category_orders for model. Writing counts without specific order.")
+                     print(f"    Warning: Category '{category_key}' not found in category_orders. Writing counts without specific order.")
+                     ground_truth_counts = category_counts_data[category_key]['ground_truth']
+                     for value, count in ground_truth_counts.items():
+                        writer.writerow([category_key, 'ground_truth', value, count])
                      model_counts = category_counts_data[category_key]['model']
                      for value, count in model_counts.items():
                         writer.writerow([category_key, 'model', value, count])
-            # --- END: Write all model counts ---
+
 
         generated_comparison_files.append(category_counts_file)
         print(f"    Comparison statistics for {data_type} saved to {comparison_stats_file}")
@@ -767,8 +677,8 @@ def main():
             
             # Define paths and directories
             base_model_name = os.getenv('MODEL_1.3B_CHKPOINT')
-            adapter_checkpoint = "/home/ubuntu/DeepSeek-VL-Finetuning/training_stage/new_cluster_training_runs_final-ver_models/OpB_b6_s42/first_epoch_chkpoint/adapter/"
-            merged_model_dir = "/home/ubuntu/DeepSeek-VL-Finetuning/training_stage/new_cluster_training_runs_final-ver_models/OpB_b6_s42/first_epoch_chkpoint/merged_model/4bit_model"
+            adapter_checkpoint = "/home/ubuntu/DeepSeek-VL-Finetuning/training_stage/new_cluster_training_runs_final-ver_models/1.3b_Option-A_version2_fixed/first-run_loss/best_chkpoint/adapter/"
+            merged_model_dir = "/home/ubuntu/DeepSeek-VL-Finetuning/training_stage/new_cluster_training_runs_final-ver_models/1.3b_Option-A_version2_fixed/first-run_loss/best_chkpoint/merged_model_best_chkpoint/_4bit_model"
             test_labels_dir = "./test/"
             extraction_dir = "./extraction_results/"
             #ground_truth_csv = "./extraction_results/extraction_results_ground-truth.csv"

@@ -1,5 +1,0 @@
-Category,Total Rows,Matching Rows,Non-Matching Rows,Match Percentage
-lane,216,111,105,51.39%
-obstacle,216,105,111,48.61%
-decision,216,181,35,83.80%
-final_decision,216,181,35,83.80%
