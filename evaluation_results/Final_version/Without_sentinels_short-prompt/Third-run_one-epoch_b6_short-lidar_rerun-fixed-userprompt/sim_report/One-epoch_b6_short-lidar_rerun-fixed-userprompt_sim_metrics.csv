@@ -1,0 +1,10 @@
+model,Complete Exact Accuracy,Decision Macro F-2.0 Score,Lane Macro F-1.0 Score,Obstacle Macro F-1.0 Score,Obstacle Quadratic Weighted Cohen's Kappa,Composite Score,Weight Decision F-beta,Weight Lane F-beta,Weight Obstacle Kappa
+Short-prompt-v2-short-lidar_b6_s23_fixed-userprompt_epoch1,0.9358,0.9444,0.9749,0.9308,0.9081,0.9463,0.5,0.3,0.2
+Short-prompt-v2-short-lidar_b6_s23_fixed-userprompt_step1349,0.9014,0.939,0.9552,0.8988,0.8603,0.9281,0.5,0.3,0.2
+Short-prompt-v2-short-lidar_b6_s42_fixed-userprompt_step1349,0.9289,0.9256,0.9656,0.9323,0.9195,0.9364,0.5,0.3,0.2
+Short-prompt-v2-short-lidar_b6_s42_fixed-userprompt_epoch1,0.9564,0.946,0.9583,0.9508,0.9502,0.9505,0.5,0.3,0.2
+Short-prompt-v2-short-lidar_b6_s322_fixed-userprompt_step1349,0.9518,0.9473,0.9749,0.9487,0.9201,0.9501,0.5,0.3,0.2
+Short-prompt-v2-short-lidar_b6_s322_fixed-userprompt_epoch1,0.9564,0.9406,0.9583,0.9494,0.9378,0.9454,0.5,0.3,0.2
+Short-prompt-v2-short-lidar_b6_s42_fixed-userprompt_best,0.906,0.9382,0.92,0.9304,0.9038,0.9259,0.5,0.3,0.2
+Short-prompt-v2-short-lidar_b6_s322_fixed-userprompt_best,0.9128,0.9432,0.9765,0.9092,0.8339,0.9313,0.5,0.3,0.2
+Short-prompt-v2-short-lidar_b6_s23_fixed-userprompt_best,0.8807,0.9087,0.9068,0.8839,0.8488,0.8962,0.5,0.3,0.2
