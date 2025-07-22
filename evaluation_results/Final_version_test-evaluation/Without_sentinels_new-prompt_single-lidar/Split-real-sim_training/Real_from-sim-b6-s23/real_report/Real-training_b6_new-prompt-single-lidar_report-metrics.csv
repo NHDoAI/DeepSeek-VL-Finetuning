@@ -1,0 +1,10 @@
+model,Complete Exact Accuracy,Decision Macro F-2.0 Score,Lane Macro F-1.0 Score,Obstacle Macro F-1.0 Score,Obstacle Quadratic Weighted Cohen's Kappa,Composite Score,Weight Decision F-beta,Weight Lane F-beta,Weight Obstacle Kappa
+Real-training_b6-s23_from-sim-b6-s23-full-epoch_step899_mode-,0.8148,0.7931,0.9187,0.799,0.9286,0.8579,0.5,0.3,0.2
+Real-training_b6-s322_from-sim-b6-s23-full-epoch_step899_mode-,0.8102,0.7958,0.911,0.7976,0.9261,0.8564,0.5,0.3,0.2
+Real-training_b6-s42_from-sim-b6-s23-full-epoch_full-epoch_mode-,0.8056,0.7903,0.9081,0.7934,0.9243,0.8524,0.5,0.3,0.2
+Real-training_b6-s23_from-sim-b6-s23-full-epoch_best_mode-,0.7685,0.7418,0.9099,0.7681,0.9156,0.827,0.5,0.3,0.2
+Real-training_b6-s322_from-sim-b6-s23-full-epoch_full-epoch_mode-,0.8241,0.8015,0.9162,0.8048,0.9314,0.8619,0.5,0.3,0.2
+Real-training_b6-s23_from-sim-b6-s23-full-epoch_full-epoch_mode-,0.8241,0.8012,0.9186,0.8052,0.9304,0.8623,0.5,0.3,0.2
+Real-training_b6-s42_from-sim-b6-s23-full-epoch_step899_mode-,0.8287,0.808,0.9236,0.8155,0.9362,0.8683,0.5,0.3,0.2
+Real-training_b6-s322_from-sim-b6-s23-full-epoch_best_mode-,0.787,0.7903,0.8958,0.7934,0.9243,0.8487,0.5,0.3,0.2
+Real-training_b6-s42_from-sim-b6-s23-full-epoch_best_mode-,0.5787,0.7281,0.7458,0.7375,0.9019,0.7682,0.5,0.3,0.2

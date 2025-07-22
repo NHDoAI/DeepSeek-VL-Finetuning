@@ -1,0 +1,69 @@
+--- Analysis for Category: lane ---
+
+Confusion Matrix:
+            left lane  right lane  unclear
+left lane          80           3        3
+right lane          5          77        4
+unclear             0           0       32
+
+Metrics per Sub-category:
+sub_category  precision   recall  specificity  TP  FP  FN  TN
+   left lane   0.941176 0.930233     0.957627  80   5   6 113
+  right lane   0.962500 0.895349     0.974576  77   3   9 115
+     unclear   0.820513 1.000000     0.959302  32   7   0 165
+
+Macro F-1.0 Score: 0.9216
+
+==================================================
+
+--- Analysis for Category: obstacle ---
+
+Confusion Matrix:
+                      very close  near  far away  not on the same lane
+very close                    12     0         0                     0
+near                          23    20         1                     0
+far away                       0     7        57                     0
+not on the same lane           0     0         4                    80
+
+Metrics per Sub-category:
+        sub_category  precision   recall  specificity  TP  FP  FN  TN
+          very close   0.342857 1.000000     0.880208  12  23   0 169
+                near   0.740741 0.454545     0.956250  20   7  24 153
+            far away   0.919355 0.890625     0.964286  57   5   7 135
+not on the same lane   1.000000 0.952381     1.000000  80   0   4 120
+
+Macro F-1.0 Score: 0.7386
+Quadratic Weighted Cohen's Kappa: 0.9178
+
+==================================================
+
+--- Analysis for Category: decision ---
+
+Confusion Matrix:
+                  slow cruise  straight forward  switch lane
+slow cruise                20                 1           23
+straight forward            7               141            0
+switch lane                 0                 0           12
+
+Metrics per Sub-category:
+    sub_category  precision   recall  specificity  TP  FP  FN  TN
+     slow cruise   0.740741 0.454545     0.956250  20   7  24 153
+straight forward   0.992958 0.952703     0.982143 141   1   7  55
+     switch lane   0.342857 1.000000     0.880208  12  23   0 169
+
+Macro F-2.0 Score: 0.7253
+
+==================================================
+
+--- Overall Performance Metrics ---
+
+Complete Exact Accuracy: 0.7745 (158/204)
+
+--- Components of Composite Score ---
+Decision Macro F-2.0 Score: 0.7253
+Lane Macro F-1.0 Score: 0.9216
+Obstacle Macro F-1.0 Score: 0.7386
+Obstacle Quadratic Weighted Cohen's Kappa: 0.9178
+
+Composite Score: 0.8227
+(Weights: Decision F-beta=0.5, Lane F-beta=0.3, Obstacle Kappa=0.2)

@@ -1,0 +1,10 @@
+model,Complete Exact Accuracy,Decision Macro F-2.0 Score,Lane Macro F-1.0 Score,Obstacle Macro F-1.0 Score,Obstacle Quadratic Weighted Cohen's Kappa,Composite Score,Weight Decision F-beta,Weight Lane F-beta,Weight Obstacle Kappa
+long-prompt_OpA_CE_b6-s42_best,0.7206,0.6766,0.9176,0.6943,0.8986,0.7933,0.5,0.3,0.2
+long-prompt_OpA_CE_b6-s23_best,0.701,0.5845,0.8662,0.6655,0.8963,0.7314,0.5,0.3,0.2
+long-prompt_OpA_CE_b6-s23_full-epoch,0.6667,0.6324,0.8834,0.6675,0.8839,0.758,0.5,0.3,0.2
+long-prompt_OpA_CE_b6-s42_step2299,0.7892,0.7194,0.9294,0.7566,0.9251,0.8235,0.5,0.3,0.2
+long-prompt_OpA_CE_b6-s42_full-epoch,0.7108,0.7345,0.9011,0.7036,0.8978,0.8171,0.5,0.3,0.2
+long-prompt_OpA_CE_b6-s322_step2299,0.8137,0.7676,0.9057,0.81,0.9397,0.8435,0.5,0.3,0.2
+long-prompt_OpA_CE_b6-s23_step2299,0.6618,0.5829,0.8834,0.6264,0.8736,0.7312,0.5,0.3,0.2
+long-prompt_OpA_CE_b6-s322_full-epoch,0.7696,0.7286,0.911,0.7395,0.9023,0.8181,0.5,0.3,0.2
+long-prompt_OpA_CE_b6-s322_best,0.799,0.701,0.9451,0.7398,0.9187,0.8178,0.5,0.3,0.2
