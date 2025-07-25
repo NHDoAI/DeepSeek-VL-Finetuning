@@ -1,0 +1,1 @@
+scp -r -P 7070 ./ nguyend@10.16.246.5:/home/nguyend/final_data/
