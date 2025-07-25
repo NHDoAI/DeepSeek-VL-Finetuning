@@ -1,0 +1,16 @@
+model,Complete Exact Accuracy,Decision Macro F-2.0 Score,Lane Macro F-1.0 Score,Obstacle Macro F-1.0 Score,Obstacle Quadratic Weighted Cohen's Kappa,Composite Score,Weight Decision F-beta,Weight Lane F-beta,Weight Obstacle Kappa
+full_b6-s322_shortprompt_short-lidar_focal-loss_2xalpha_step2299,0.9569,0.955,1.0,0.9451,0.9788,0.9733,0.5,0.3,0.2
+full_b6-s42_shortprompt_short-lidar_focal-loss_2xalpha_epoch2,0.9492,0.9007,0.9975,0.9158,0.977,0.945,0.5,0.3,0.2
+full_b6-s23_shortprompt_short-lidar_focal-loss_2xalpha_best,0.9289,0.9375,1.0,0.9149,0.9656,0.9619,0.5,0.3,0.2
+full_b6-s322_shortprompt_short-lidar_focal-loss_2xalpha_epoch2,0.9695,0.9625,1.0,0.9556,0.9855,0.9784,0.5,0.3,0.2
+full_b6-s42_shortprompt_short-lidar_focal-loss_2xalpha_full-epoch,0.9619,0.9386,1.0,0.9359,0.9823,0.9658,0.5,0.3,0.2
+full_b6-s322_shortprompt_short-lidar_focal-loss_2xalpha_full-epoch,0.8604,0.9258,1.0,0.8641,0.9286,0.9486,0.5,0.3,0.2
+full_b6-s322_shortprompt_short-lidar_focal-loss_2xalpha_epoch1.5,0.9543,0.9757,1.0,0.9495,0.978,0.9835,0.5,0.3,0.2
+full_b6-s322_shortprompt_short-lidar_focal-loss_2xalpha_best,0.9162,0.9363,1.0,0.9049,0.96,0.9602,0.5,0.3,0.2
+full_b6-s42_shortprompt_short-lidar_focal-loss_2xalpha_best,0.9518,0.888,0.9975,0.9148,0.9771,0.9386,0.5,0.3,0.2
+full_b6-s23_shortprompt_short-lidar_focal-loss_2xalpha_epoch1.5,0.9518,0.9438,0.9975,0.9321,0.9773,0.9666,0.5,0.3,0.2
+full_b6-s23_shortprompt_short-lidar_focal-loss_2xalpha_full-epoch,0.9416,0.9432,1.0,0.9258,0.9718,0.9659,0.5,0.3,0.2
+full_b6-s23_shortprompt_short-lidar_focal-loss_2xalpha_step2299,0.9188,0.9181,1.0,0.899,0.961,0.9513,0.5,0.3,0.2
+full_b6-s23_shortprompt_short-lidar_focal-loss_2xalpha_epoch2,0.9239,0.9165,1.0,0.9024,0.9628,0.9508,0.5,0.3,0.2
+full_b6-s42_shortprompt_short-lidar_focal-loss_2xalpha_epoch1.5,0.9518,0.8973,1.0,0.9166,0.9766,0.944,0.5,0.3,0.2
+full_b6-s42_shortprompt_short-lidar_focal-loss_2xalpha_step2299,0.9467,0.8925,1.0,0.9072,0.9747,0.9412,0.5,0.3,0.2

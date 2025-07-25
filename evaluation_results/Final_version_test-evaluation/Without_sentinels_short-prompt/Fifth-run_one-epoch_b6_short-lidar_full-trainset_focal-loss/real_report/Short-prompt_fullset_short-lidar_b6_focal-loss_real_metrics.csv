@@ -1,0 +1,10 @@
+model,Complete Exact Accuracy,Decision Macro F-2.0 Score,Lane Macro F-1.0 Score,Obstacle Macro F-1.0 Score,Obstacle Quadratic Weighted Cohen's Kappa,Composite Score,Weight Decision F-beta,Weight Lane F-beta,Weight Obstacle Kappa
+Short-prompt-v5-full-short-lidar_b6-s322_focal-loss_best,0.8426,0.8575,0.9505,0.8323,0.9314,0.9002,0.5,0.3,0.2
+Short-prompt-v5-full-short-lidar_b6-s23_focal-loss_full-epoch,0.8843,0.9242,0.9254,0.9108,0.9624,0.9322,0.5,0.3,0.2
+Short-prompt-v5-full-short-lidar_b6-s322_focal-loss_full-epoch,0.8611,0.8406,0.9499,0.8298,0.9367,0.8926,0.5,0.3,0.2
+Short-prompt-v5-full-short-lidar_b6-s23_focal-loss_step2299,0.8843,0.8583,0.9273,0.8938,0.9619,0.8997,0.5,0.3,0.2
+Short-prompt-v5-full-short-lidar_b6-s23_focal-loss_best,0.8194,0.8537,0.9063,0.8562,0.9368,0.8861,0.5,0.3,0.2
+Short-prompt-v5-full-short-lidar_b6-s42_focal-loss_full-epoch,0.8056,0.8156,0.9159,0.8002,0.9222,0.867,0.5,0.3,0.2
+Short-prompt-v5-full-short-lidar_b6-s42_focal-loss_step2299,0.8472,0.8239,0.9462,0.8133,0.9311,0.882,0.5,0.3,0.2
+Short-prompt-v5-full-short-lidar_b6-s42_focal-loss_best,0.8657,0.8549,0.9407,0.8469,0.9426,0.8982,0.5,0.3,0.2
+Short-prompt-v5-full-short-lidar_b6-s322_focal-loss_step2299,0.8796,0.8326,0.9499,0.8585,0.9411,0.8895,0.5,0.3,0.2

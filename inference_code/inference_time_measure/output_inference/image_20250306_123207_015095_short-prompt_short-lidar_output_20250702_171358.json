@@ -1,0 +1,18 @@
+{
+    "conversation": [
+        {
+            "role": "User",
+            "content": "<image_placeholder> Analyze the given image from a real toy vehicle's front-facing camera (The real toy vehicle travels at half the speed of the simulated vehicle). First determine the lane the vehicle is on. Then determine if there is an obstacle directly ahead in the lane the vehicle is currently occupying or not. If an obstacle is present, determine how far away the obstacle is and decide the best movement option based on that. The lidar points are as follows: { 179.0: 1.0360 ; 180.0: 1.1150 ; 181.0: 1.2410 } Guidelines for Decision Making: First determine if the vehicle is currently on the right lane or left lane of the road. Then determine if no obstacle is detected in the current lane or if it is 'far away', then the vehicle should continue moving 'straight forward'. If an obstacle is detected in the current lane (not the other lane) and it is 'near' to the vehicle, it should 'slow cruise' cautiously until the vehicle is very close to the obstacle. Then if an obstacle is detected on the current lane and it is 'very close' to the vehicle (there is little to no road left between the vehicle and the obstacle), the vehicle should 'switch lane'. Response Format (Strict Adherence Required): Lane: {left lane | right lane | unclear}; Obstacles: {not on the same lane | far away | near | very close}; Decision: {decision}",
+            "images": [
+                "./test/real/images/image_20250306_123207_015095.png"
+            ]
+        },
+        {
+            "role": "Assistant",
+            "content": "Lane: right lane; Obstacles: far away; Decision: continue moving straight forward"
+        }
+    ],
+    "time": 0.9164,
+    "memory": "6700MB",
+    "model": "7B"
+}

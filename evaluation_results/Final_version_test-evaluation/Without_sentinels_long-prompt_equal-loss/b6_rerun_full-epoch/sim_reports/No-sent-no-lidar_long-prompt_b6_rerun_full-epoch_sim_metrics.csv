@@ -1,0 +1,4 @@
+model,Complete Exact Accuracy,Decision Macro F-2.0 Score,Lane Macro F-1.0 Score,Obstacle Macro F-1.0 Score,Obstacle Quadratic Weighted Cohen's Kappa,Composite Score,Weight Decision F-beta,Weight Lane F-beta,Weight Obstacle Kappa
+No-sent-no-lidar_long-prompt_b6-s23_rerun_full-epoch,0.9541,0.934,0.9614,0.9402,0.9832,0.952,0.5,0.3,0.2
+No-sent-no-lidar_long-prompt_b6-s322_rerun_full-epoch,0.9495,0.9294,0.9614,0.9347,0.9812,0.9494,0.5,0.3,0.2
+No-sent-no-lidar_long-prompt_b6-s42_rerun_full-epoch,0.9495,0.9272,0.9614,0.9339,0.9813,0.9483,0.5,0.3,0.2

@@ -1,0 +1,217 @@
+file_name,lane,obstacle,decision
+image_20250424_103509_888071.json,right lane,far away,straight forward
+image_20250424_101802_835782.json,right lane,far away,straight forward
+image_20250424_103537_002625_mirrored.json,left lane,far away,straight forward
+image_20250424_104314_041274.json,left lane,not on the same lane,straight forward
+image_20250424_110125_163688.json,right lane,not on the same lane,straight forward
+image_20250424_104338_046621.json,left lane,not on the same lane,straight forward
+image_20250424_105601_127179_mirrored.json,right lane,near,slow cruise
+image_20250424_110109_163482_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_103514_122148_mirrored.json,left lane,far away,straight forward
+image_20250424_110126_168134_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_101839_954034.json,unclear,very close,switch lane
+image_20250424_104318_041591.json,left lane,not on the same lane,straight forward
+image_20250424_110113_163694.json,right lane,not on the same lane,straight forward
+image_20250424_104300_042598_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_105557_782584_mirrored.json,right lane,near,slow cruise
+image_20250424_104336_040742.json,left lane,not on the same lane,straight forward
+image_20250424_103442_902006.json,right lane,far away,straight forward
+image_20250424_105530_868179.json,left lane,far away,straight forward
+image_20250306_123234_840524.json,right lane,near,slow cruise
+image_20250424_101833_286264_mirrored.json,left lane,near,slow cruise
+image_20250424_104302_041486_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_110111_163560_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_110123_163480.json,right lane,not on the same lane,straight forward
+image_20250306_123323_121963_mirrored.json,unclear,very close,switch lane
+image_20250306_123237_629491.json,right lane,near,slow cruise
+image_20250306_123158_420121_mirrored.json,left lane,far away,straight forward
+image_20250424_110107_168800.json,right lane,not on the same lane,straight forward
+image_20250424_104330_041485.json,left lane,not on the same lane,straight forward
+image_20250306_123242_756255.json,unclear,very close,switch lane
+image_20250424_103540_030938.json,unclear,near,slow cruise
+image_20250424_104258_041477_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_105543_954019.json,left lane,far away,straight forward
+image_20250424_101802_835782_mirrored.json,left lane,far away,straight forward
+image_20250306_123231_157878.json,right lane,far away,straight forward
+image_20250424_103533_794086.json,right lane,far away,straight forward
+image_20250424_101829_132113_mirrored.json,left lane,near,slow cruise
+image_20250424_103541_265078.json,unclear,near,slow cruise
+image_20250306_123243_669581_mirrored.json,unclear,very close,switch lane
+image_20250424_110103_163481.json,right lane,not on the same lane,straight forward
+image_20250424_110123_163480_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_110111_163560.json,right lane,not on the same lane,straight forward
+image_20250424_101757_415300.json,right lane,far away,straight forward
+image_20250424_104314_041274_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_101812_637593_mirrored.json,left lane,far away,straight forward
+image_20250424_110126_168134.json,right lane,not on the same lane,straight forward
+image_20250424_104308_041534.json,left lane,not on the same lane,straight forward
+image_20250424_105604_170241_mirrored.json,unclear,very close,switch lane
+image_20250424_104326_041603.json,left lane,not on the same lane,straight forward
+image_20250424_104302_041486.json,left lane,not on the same lane,straight forward
+image_20250424_105550_735404.json,left lane,far away,straight forward
+image_20250424_110101_163707.json,right lane,not on the same lane,straight forward
+image_20250306_123242_190513.json,unclear,very close,switch lane
+image_20250424_104316_044335_mirrored.json,right lane,not on the same lane,straight forward
+image_20250306_123243_669581.json,unclear,very close,switch lane
+image_20250424_105547_144987_mirrored.json,right lane,far away,straight forward
+image_20250424_104316_044335.json,left lane,not on the same lane,straight forward
+image_20250424_104312_041509_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_105521_509112.json,left lane,far away,straight forward
+image_20250306_123216_144177_mirrored.json,left lane,far away,straight forward
+image_20250424_105553_661588_mirrored.json,right lane,far away,straight forward
+image_20250424_110107_168800_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_105558_721827.json,left lane,near,slow cruise
+image_20250424_103533_794086_mirrored.json,left lane,far away,straight forward
+image_20250306_123242_190513_mirrored.json,unclear,very close,switch lane
+image_20250424_105558_721827_mirrored.json,right lane,near,slow cruise
+image_20250424_110059_163582_mirrored.json,left lane,not on the same lane,straight forward
+image_20250306_123317_191195_mirrored.json,left lane,near,slow cruise
+image_20250424_101757_415300_mirrored.json,left lane,far away,straight forward
+image_20250424_105604_170241.json,unclear,very close,switch lane
+image_20250424_104310_041488_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_101832_372112_mirrored.json,left lane,near,slow cruise
+image_20250424_110117_163559.json,right lane,not on the same lane,straight forward
+image_20250424_105547_144987.json,left lane,far away,straight forward
+image_20250424_104328_042747_mirrored.json,right lane,not on the same lane,straight forward
+image_20250306_123239_594732_mirrored.json,left lane,near,slow cruise
+image_20250424_105527_995102_mirrored.json,right lane,far away,straight forward
+image_20250424_105514_161024_mirrored.json,right lane,far away,straight forward
+image_20250306_123240_524614_mirrored.json,left lane,very close,switch lane
+image_20250424_101822_413804_mirrored.json,left lane,far away,straight forward
+image_20250306_123239_594732.json,right lane,near,slow cruise
+image_20250306_123241_484208.json,unclear,very close,switch lane
+image_20250424_105533_659450.json,left lane,far away,straight forward
+image_20250424_101826_135883_mirrored.json,left lane,far away,straight forward
+image_20250424_104336_040742_mirrored.json,right lane,not on the same lane,straight forward
+image_20250306_123216_144177.json,right lane,far away,straight forward
+image_20250424_103509_888071_mirrored.json,left lane,far away,straight forward
+image_20250424_103540_030938_mirrored.json,unclear,near,slow cruise
+image_20250424_101812_637593.json,right lane,far away,straight forward
+image_20250424_104338_046621_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_110115_163676_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_101826_135883.json,right lane,near,slow cruise
+image_20250306_123314_861072.json,right lane,near,slow cruise
+image_20250424_103520_733780.json,right lane,far away,straight forward
+image_20250424_110113_163694_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_105543_954019_mirrored.json,right lane,far away,straight forward
+image_20250306_123231_157878_mirrored.json,left lane,far away,straight forward
+image_20250306_123317_191195.json,right lane,near,slow cruise
+image_20250424_101835_799742.json,right lane,near,slow cruise
+image_20250424_101831_408220.json,right lane,near,slow cruise
+image_20250424_101834_280268_mirrored.json,left lane,near,slow cruise
+image_20250424_104308_041534_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_103538_716376_mirrored.json,left lane,near,slow cruise
+image_20250424_104332_043654.json,left lane,not on the same lane,straight forward
+image_20250424_110105_163506.json,right lane,not on the same lane,straight forward
+image_20250424_101807_866120.json,right lane,far away,straight forward
+image_20250424_103501_195634_mirrored.json,left lane,far away,straight forward
+image_20250424_105555_771411.json,left lane,near,slow cruise
+image_20250424_104256_041482.json,left lane,not on the same lane,straight forward
+image_20250306_123207_015095_mirrored.json,left lane,far away,straight forward
+image_20250424_110115_163676.json,right lane,not on the same lane,straight forward
+image_20250306_123240_524614.json,right lane,very close,switch lane
+image_20250306_123320_756056_mirrored.json,unclear,near,slow cruise
+image_20250424_104304_040467.json,left lane,not on the same lane,straight forward
+image_20250424_110125_163688_mirrored.json,left lane,not on the same lane,straight forward
+image_20250306_123321_778474_mirrored.json,unclear,near,slow cruise
+image_20250424_101822_413804.json,right lane,far away,straight forward
+image_20250424_103514_122148.json,right lane,far away,straight forward
+image_20250424_104322_041519.json,left lane,not on the same lane,straight forward
+image_20250424_105557_782584.json,left lane,near,slow cruise
+image_20250424_105421_339298_mirrored.json,unclear,very close,switch lane
+image_20250424_104254_041679.json,left lane,not on the same lane,straight forward
+image_20250424_104332_043654_mirrored.json,right lane,not on the same lane,straight forward
+image_20250306_123322_456746.json,unclear,very close,switch lane
+image_20250306_123234_840524_mirrored.json,left lane,near,slow cruise
+image_20250424_103442_902006_mirrored.json,left lane,far away,straight forward
+image_20250306_123224_140866_mirrored.json,left lane,far away,straight forward
+image_20250306_123252_350742.json,unclear,very close,switch lane
+image_20250306_123237_629491_mirrored.json,left lane,near,slow cruise
+image_20250424_104328_042747.json,left lane,not on the same lane,straight forward
+image_20250424_101849_972143.json,unclear,very close,switch lane
+image_20250424_104306_042694_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_101817_379623_mirrored.json,left lane,far away,straight forward
+image_20250424_103541_265078_mirrored.json,unclear,near,slow cruise
+image_20250424_101839_954034_mirrored.json,unclear,very close,switch lane
+image_20250424_110103_163481_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_105536_317667.json,left lane,far away,straight forward
+image_20250306_123207_015095.json,right lane,far away,straight forward
+image_20250306_123224_140866.json,right lane,far away,straight forward
+image_20250424_110109_163482.json,right lane,not on the same lane,straight forward
+image_20250306_123319_197778.json,right lane,near,slow cruise
+image_20250424_110117_163559_mirrored.json,left lane,not on the same lane,straight forward
+image_20250306_123321_778474.json,unclear,very close,switch lane
+image_20250424_104326_041603_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_105603_316319_mirrored.json,unclear,near,slow cruise
+image_20250424_105419_238101_mirrored.json,unclear,very close,switch lane
+image_20250424_103501_195634.json,right lane,far away,straight forward
+image_20250424_101831_408220_mirrored.json,left lane,near,slow cruise
+image_20250306_123252_350742_mirrored.json,unclear,very close,switch lane
+image_20250424_105521_509112_mirrored.json,right lane,far away,straight forward
+image_20250306_123242_756255_mirrored.json,unclear,very close,switch lane
+image_20250424_104318_041591_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_105533_659450_mirrored.json,right lane,far away,straight forward
+image_20250306_123322_456746_mirrored.json,unclear,very close,switch lane
+image_20250424_103538_716376.json,right lane,far away,straight forward
+image_20250424_104324_043291.json,left lane,not on the same lane,straight forward
+image_20250424_105536_317667_mirrored.json,right lane,far away,straight forward
+image_20250424_110105_163506_mirrored.json,left lane,not on the same lane,straight forward
+image_20250306_123241_484208_mirrored.json,unclear,very close,switch lane
+image_20250424_105602_309479.json,unclear,near,slow cruise
+image_20250424_105603_316319.json,unclear,near,slow cruise
+image_20250424_101830_337474_mirrored.json,left lane,near,slow cruise
+image_20250424_101835_799742_mirrored.json,left lane,near,slow cruise
+image_20250424_104320_046012_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_105550_735404_mirrored.json,right lane,far away,straight forward
+image_20250424_105527_995102.json,left lane,far away,straight forward
+image_20250424_101817_379623.json,right lane,far away,straight forward
+image_20250424_105553_661588.json,left lane,far away,straight forward
+image_20250424_110119_163827.json,right lane,not on the same lane,straight forward
+image_20250306_123323_121963.json,unclear,very close,switch lane
+image_20250424_104324_043291_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_103517_860947_mirrored.json,left lane,far away,straight forward
+image_20250424_110121_163494_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_110121_163494.json,right lane,not on the same lane,straight forward
+image_20250424_101854_497498.json,unclear,very close,switch lane
+image_20250424_105421_339298.json,unclear,very close,switch lane
+image_20250424_103537_002625.json,right lane,far away,straight forward
+image_20250424_104330_041485_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_110059_163582.json,right lane,not on the same lane,straight forward
+image_20250424_104334_042552.json,left lane,not on the same lane,straight forward
+image_20250424_110101_163707_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_105514_161024.json,left lane,far away,straight forward
+image_20250306_123320_756056.json,unclear,very close,switch lane
+image_20250424_101832_372112.json,right lane,near,slow cruise
+image_20250424_104300_042598.json,left lane,not on the same lane,straight forward
+image_20250424_105538_780283_mirrored.json,right lane,far away,straight forward
+image_20250424_101829_132113.json,right lane,near,slow cruise
+image_20250424_110119_163827_mirrored.json,left lane,not on the same lane,straight forward
+image_20250424_104312_041509.json,left lane,not on the same lane,straight forward
+image_20250424_104258_041477.json,left lane,not on the same lane,straight forward
+image_20250424_101854_497498_mirrored.json,unclear,very close,switch lane
+image_20250424_105419_238101.json,unclear,very close,switch lane
+image_20250424_105538_780283.json,left lane,far away,straight forward
+image_20250424_105530_868179_mirrored.json,right lane,far away,straight forward
+image_20250424_104334_042552_mirrored.json,right lane,not on the same lane,straight forward
+image_20250306_123314_861072_mirrored.json,left lane,near,slow cruise
+image_20250424_101849_972143_mirrored.json,unclear,very close,switch lane
+image_20250424_105601_127179.json,left lane,near,slow cruise
+image_20250306_123158_420121.json,right lane,far away,straight forward
+image_20250424_101834_280268.json,right lane,near,slow cruise
+image_20250424_105602_309479_mirrored.json,unclear,near,slow cruise
+image_20250424_101833_286264.json,right lane,near,slow cruise
+image_20250424_103505_218760_mirrored.json,left lane,far away,straight forward
+image_20250424_105555_771411_mirrored.json,right lane,near,slow cruise
+image_20250424_104320_046012.json,left lane,not on the same lane,straight forward
+image_20250424_104306_042694.json,left lane,not on the same lane,straight forward
+image_20250424_104254_041679_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_104322_041519_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_103505_218760.json,right lane,far away,straight forward
+image_20250424_103520_733780_mirrored.json,left lane,far away,straight forward
+image_20250424_104310_041488.json,left lane,not on the same lane,straight forward
+image_20250306_123319_197778_mirrored.json,left lane,near,slow cruise
+image_20250424_101807_866120_mirrored.json,left lane,far away,straight forward
+image_20250424_101830_337474.json,right lane,near,slow cruise
+image_20250424_103517_860947.json,right lane,far away,straight forward
+image_20250424_104256_041482_mirrored.json,right lane,not on the same lane,straight forward
+image_20250424_104304_040467_mirrored.json,right lane,not on the same lane,straight forward

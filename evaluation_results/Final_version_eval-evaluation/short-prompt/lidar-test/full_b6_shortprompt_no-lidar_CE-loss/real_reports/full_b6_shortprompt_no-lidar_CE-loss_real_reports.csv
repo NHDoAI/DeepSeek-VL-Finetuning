@@ -1,0 +1,10 @@
+model,Complete Exact Accuracy,Decision Macro F-2.0 Score,Lane Macro F-1.0 Score,Obstacle Macro F-1.0 Score,Obstacle Quadratic Weighted Cohen's Kappa,Composite Score,Weight Decision F-beta,Weight Lane F-beta,Weight Obstacle Kappa
+full_b6-s42_shortprompt_no-lidar_CE-loss_best,0.7647,0.7719,0.9424,0.7431,0.9078,0.8502,0.5,0.3,0.2
+full_b6-s322_shortprompt_no-lidar_CE-loss_step2299,0.799,0.7539,0.9113,0.779,0.9312,0.8366,0.5,0.3,0.2
+full_b6-s322_shortprompt_no-lidar_CE-loss_full-epoch,0.7402,0.7253,0.8911,0.7209,0.9099,0.812,0.5,0.3,0.2
+full_b6-s322_shortprompt_no-lidar_CE-loss_best,0.8137,0.717,0.9412,0.7539,0.9295,0.8268,0.5,0.3,0.2
+full_b6-s23_shortprompt_no-lidar_CE-loss_full-epoch,0.7843,0.7383,0.9272,0.7381,0.9164,0.8306,0.5,0.3,0.2
+full_b6-s42_shortprompt_no-lidar_CE-loss_full-epoch,0.7745,0.7253,0.9216,0.7386,0.9178,0.8227,0.5,0.3,0.2
+full_b6-s42_shortprompt_no-lidar_CE-loss_step2299,0.7843,0.733,0.928,0.7453,0.9137,0.8276,0.5,0.3,0.2
+full_b6-s23_shortprompt_no-lidar_CE-loss_best,0.799,0.821,0.9176,0.811,0.9327,0.8724,0.5,0.3,0.2
+full_b6-s23_shortprompt_no-lidar_CE-loss_step2299,0.7696,0.745,0.9385,0.7354,0.9094,0.8359,0.5,0.3,0.2

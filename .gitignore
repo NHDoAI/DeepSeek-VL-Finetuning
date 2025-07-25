@@ -424,6 +424,7 @@ training_code/test_tensor.py
 training_v1_eval-batch.py
 training_script_versions.txt
 *.safetensors
+scp_command.txt
 
 #un-needed folders
 random_scripts/
@@ -432,7 +433,6 @@ labels/
 inferences_output/
 output/
 inference_code/test_objects_detection/
-wandb/
 test_images/
 test_labels/
 images_backup/
@@ -447,3 +447,5 @@ version_evaluation/
 *merged_model*/
 evaluation_stage/
 training_stage/
+archive/
+training_results/

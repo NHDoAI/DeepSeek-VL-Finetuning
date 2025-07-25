@@ -1,0 +1,10 @@
+model,Complete Exact Accuracy,Decision Macro F-2.0 Score,Lane Macro F-1.0 Score,Obstacle Macro F-1.0 Score,Obstacle Quadratic Weighted Cohen's Kappa,Composite Score,Weight Decision F-beta,Weight Lane F-beta,Weight Obstacle Kappa
+Short-prompt-v1_b12_seed23_long-lidar_epoch3,0.9587,0.9418,0.9938,0.9513,0.942,0.9574,0.5,0.3,0.2
+Short-prompt-v1_b12_seed23_long-lidar_epoch2,0.9495,0.9314,0.9614,0.9355,0.9367,0.9415,0.5,0.3,0.2
+Short-prompt-v1_b12_seed322_long-lidar_epoch1,0.9587,0.9411,0.9984,0.9464,0.9251,0.9551,0.5,0.3,0.2
+Short-prompt-v1_b12_seed322_long-lidar_epoch3,0.9656,0.9397,0.9969,0.9568,0.9445,0.9578,0.5,0.3,0.2
+Short-prompt-v1_b12_seed322_long-lidar_epoch2,0.9518,0.9225,0.9984,0.9323,0.9252,0.9458,0.5,0.3,0.2
+Short-prompt-v1_b12_seed42_long-lidar_epoch2,0.9335,0.9082,0.9708,0.9223,0.9158,0.9285,0.5,0.3,0.2
+Short-prompt-v1_b12_seed42_long-lidar_epoch3,0.945,0.9259,0.9938,0.9402,0.9367,0.9484,0.5,0.3,0.2
+Short-prompt-v1_b12_seed23_long-lidar_epoch1,0.9427,0.9075,0.9984,0.9187,0.9114,0.9356,0.5,0.3,0.2
+Short-prompt-v1_b12_seed42_long-lidar_epoch1,0.9197,0.9219,0.9462,0.9095,0.9131,0.9274,0.5,0.3,0.2
