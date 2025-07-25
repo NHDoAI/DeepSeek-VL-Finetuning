@@ -5,7 +5,7 @@ import argparse
 import time
 from datetime import datetime
 from dotenv import load_dotenv
-from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoConfig
 from deepseek_vl.models import VLChatProcessor
 from deepseek_vl.utils.io import load_pil_images
 
@@ -38,9 +38,14 @@ def run_single_inference(model_name_or_path: str, input_json_path: str, output_d
             bnb_4bit_use_double_quant=True,
         )
         
+        # Explicitly set use_gradient_checkpointing to False for inference
+        config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        config.use_gradient_checkpointing = False
+
         print("Loading 4-bit quantized model...")
         vl_gpt = AutoModelForCausalLM.from_pretrained(
             model_name_or_path,
+            config=config,
             trust_remote_code=True,
             device_map="auto",
             quantization_config=quantization_config,
@@ -88,6 +93,9 @@ def run_single_inference(model_name_or_path: str, input_json_path: str, output_d
             force_batchify=True
         ).to(vl_gpt.device)
         
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
         prepare_inputs.pixel_values = prepare_inputs.pixel_values.to(torch.float16)
         
         inputs_embeds = vl_gpt.prepare_inputs_embeds(**prepare_inputs)
@@ -104,6 +112,9 @@ def run_single_inference(model_name_or_path: str, input_json_path: str, output_d
                 use_cache=True,
                 eos_token_id=tokenizer.eos_token_id
             )
+            if torch.cuda.is_available():
+                peak_memory = torch.cuda.max_memory_allocated() / (1024**2)
+                print(f"Peak GPU memory load during inference: {peak_memory:.2f} MiB")
         end_time = time.monotonic()
         inference_duration = end_time - start_time
         print(f"Inference generation took {inference_duration:.4f} seconds.")

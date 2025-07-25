@@ -69,6 +69,9 @@ prepare_inputs = vl_chat_processor(
     conversations=conversation, images=pil_images, force_batchify=True
 ).to(vl_gpt.device)
 
+if torch.cuda.is_available():
+    torch.cuda.reset_peak_memory_stats()
+
 # run image encoder to get the image embeddings
 inputs_embeds = vl_gpt.prepare_inputs_embeds(**prepare_inputs)
 
@@ -83,6 +86,10 @@ outputs = vl_gpt.language_model.generate(
     do_sample=False,
     use_cache=True,
 )
+
+if torch.cuda.is_available():
+    peak_memory = torch.cuda.max_memory_allocated() / (1024**2)
+    print(f"Peak GPU memory load during inference: {peak_memory:.2f} MiB")
 
 answer = tokenizer.decode(outputs[0].cpu().tolist(), skip_special_tokens=True)
 print(f"{prepare_inputs['sft_format'][0]}", answer)
