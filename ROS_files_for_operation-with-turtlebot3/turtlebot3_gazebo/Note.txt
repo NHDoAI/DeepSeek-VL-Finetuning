@@ -1,0 +1,1 @@
+The specific path to the turtlebot3 burger model urdf will need to be replaced with your local path since the worlds and launch file includes the bot-model.

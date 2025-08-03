@@ -1,0 +1,25 @@
+<launch>
+    <!-- Argument to switch between real and simulated bot -->
+    <arg name="real_bot" default="true" />
+    <arg name="initial_lane" default="right lane" /> <!-- 'left lane' or 'right lane' -->
+    <arg name="use_compressed" default="false" />
+    <arg name="visualize" default="true" />
+    <arg name="inference_wait_time" default="1.0" /> <!-- Time in seconds for the inference node to wait between continuous commands -->
+
+    <!-- Launch the turn controller node -->
+    <node name="turn_controller_node" pkg="vllm_controller_pkg" type="turn_controller_node.py" output="screen">
+        <param name="real_bot" value="$(arg real_bot)" />
+    </node>
+
+    <!-- Launch the vllm inference node -->
+    <node name="vllm_inference_node" pkg="vllm_controller_pkg" type="vllm_inference_node.py" output="screen">
+        <param name="real_bot" value="$(arg real_bot)" />
+        <param name="initial_lane" value="$(arg initial_lane)" />
+        <param name="use_compressed" value="$(arg use_compressed)" />
+        <param name="visualize" value="$(arg visualize)" />
+        <param name="inference_wait_time" value="$(arg inference_wait_time)" />
+        <!-- Optional: Specify the model path if it's different from the default in the script -->
+        <!-- <param name="model_path" value="/path/to/your/model" /> -->
+    </node>
+
+</launch> 

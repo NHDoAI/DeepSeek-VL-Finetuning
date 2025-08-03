@@ -1,0 +1,13 @@
+<launch>
+    <!-- Launch the turn controller node -->
+    <node name="turn_controller_node" pkg="turtlebot3_turn_control" type="turn_controller_node.py" output="screen">
+        <param name="real_bot" value="true" />
+
+
+    </node>
+    <!-- Launch the command input node -->
+    <node name="command_input_node" pkg="turtlebot3_turn_control" type="command_input_node.py" output="screen"/>
+
+    <!-- Launch the command input node -->
+    <node name="control_gui_node" pkg="turtlebot3_turn_control" type="control_gui_node.py" output="screen"/>
+</launch> 
