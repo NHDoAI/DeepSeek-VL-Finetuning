@@ -1,4 +1,6 @@
 """
+For evaluation of data with shortened prompts that only predict 3 categories.
+
 Combined script for model merging, evaluation, and analysis.
 This script:
 1. Merges adapter weights into a base model
