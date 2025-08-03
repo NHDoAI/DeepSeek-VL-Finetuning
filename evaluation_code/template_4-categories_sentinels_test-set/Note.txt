@@ -1,0 +1,1 @@
+This is evaluation template for test set with long-foundation prompt (predict 4 categories)

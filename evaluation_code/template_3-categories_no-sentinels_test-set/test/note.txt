@@ -1,0 +1,1 @@
+This is the folder in which you put the data set on which you want to evaluate (either test or eval set)

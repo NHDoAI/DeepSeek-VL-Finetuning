@@ -1,7 +1,0 @@
-find . -type f -name '*real_report.txt' -exec cp {} ./real_reports/ \;
-
-find ./ -type d -name "test"
-find ./ -type d -name "test" -exec rm -r {} +
-
-find ./ -type f -name '*dropout-0.15*'
-find ./ -type f -name '*dropout-0.15*' -delete
