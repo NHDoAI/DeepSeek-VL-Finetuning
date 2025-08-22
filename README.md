@@ -88,8 +88,8 @@ source devel/setup.bash
 ## Weights & Data
 
 *   **Base:** DeepSeek-VL 1.3B (SigLIP)
-*   **Data and Fine-tuned QLoRA adapters:** stored on HPC (computing cluster), in /data/departments/schoen/students/nguyend/MA_Do-Nguyen. Ask Dominik Rößle for more info.
-*   Note: The adapter checkpoint that was used for final testing of the system in the paper was the one trained with shortened lidar prompt, batch 6, seed 322, dropout of 0.15 and standard Cross-entropy loss. 
+*   **Data and Fine-tuned QLoRA adapters:** The dataset and QLoRA adapters are **not published**. You’ll need to collect/prepare your own data following the structure described in the paper (or your own equivalent) and train your own adapters before running meaningful inference.
+*   Inference without trained adapters will fall back to base weights and is unlikely to produce reliable decisions.
 
 
 ## Quickstart

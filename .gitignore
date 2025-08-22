@@ -425,6 +425,7 @@ training_v1_eval-batch.py
 training_script_versions.txt
 *.safetensors
 scp_command.txt
+README_backup.md
 
 #un-needed folders
 random_scripts/
